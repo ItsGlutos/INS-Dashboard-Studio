@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Testes e saídas locais
+_saida_teste/
+_tmp_fixtures/
+*.log
+
+# Planilhas e dashboards gerados (dados de negócio não vão para o repositório)
+*.xlsx
+*.xlsm
+*.xls
+~$*.xlsx
+
+# Configurações locais de IDE / SO
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
