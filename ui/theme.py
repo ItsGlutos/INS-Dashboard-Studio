@@ -484,4 +484,274 @@ QToolTip {
     border: 1px solid rgba(127, 212, 255, 190);
     padding: 4px 6px;
 }
+
+/* ------------------------------------------------------------------ */
+/* Abas principais e internas                                          */
+/* ------------------------------------------------------------------ */
+QTabWidget#mainTabs::pane,
+QTabWidget#enviosTabs::pane {
+    background: transparent;
+    border: none;
+    top: -1px;
+}
+
+QTabBar {
+    background: transparent;
+}
+
+QTabWidget#mainTabs QTabBar::tab,
+QTabWidget#enviosTabs QTabBar::tab {
+    color: #06345c;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 8px 18px;
+    margin-right: 4px;
+    border: 1px solid rgba(255, 255, 255, 235);
+    border-bottom: none;
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
+    background: qlineargradient(
+        x1:0, y1:0, x2:0, y2:1,
+        stop:0 rgba(255, 255, 255, 235),
+        stop:0.55 rgba(236, 249, 255, 220),
+        stop:1 rgba(196, 232, 250, 205)
+    );
+}
+
+QTabWidget#enviosTabs QTabBar::tab {
+    font-size: 11px;
+    padding: 6px 14px;
+}
+
+QTabWidget#mainTabs QTabBar::tab:hover,
+QTabWidget#enviosTabs QTabBar::tab:hover {
+    background: qlineargradient(
+        x1:0, y1:0, x2:0, y2:1,
+        stop:0 rgba(255, 255, 255, 255),
+        stop:1 rgba(214, 242, 255, 235)
+    );
+}
+
+QTabWidget#mainTabs QTabBar::tab:selected,
+QTabWidget#enviosTabs QTabBar::tab:selected {
+    color: #f5fbff;
+    border: 1px solid rgba(255, 255, 255, 245);
+    border-bottom: none;
+    background: qlineargradient(
+        x1:0, y1:0, x2:0, y2:1,
+        stop:0 rgba(150, 220, 255, 250),
+        stop:0.48 rgba(45, 155, 250, 248),
+        stop:0.52 rgba(16, 105, 195, 245),
+        stop:1 rgba(10, 77, 140, 240)
+    );
+}
+
+QTabBar::tab:disabled {
+    color: #8fa3b6;
+}
+
+/* ------------------------------------------------------------------ */
+/* Campos de entrada, editores e listas                                */
+/* ------------------------------------------------------------------ */
+QLineEdit,
+QTextEdit#bodyEditor,
+QListWidget#copyList,
+QTableWidget#confirmTable {
+    background: rgba(255, 255, 255, 232);
+    color: #0b2b46;
+    border: 1px solid rgba(255, 255, 255, 240);
+    border-radius: 9px;
+    padding: 6px 8px;
+    selection-background-color: rgba(30, 144, 255, 150);
+    selection-color: #062a52;
+}
+
+QLineEdit:focus,
+QTextEdit#bodyEditor:focus {
+    border: 1px solid rgba(30, 144, 255, 235);
+}
+
+QLineEdit:disabled,
+QTextEdit#bodyEditor:disabled,
+QListWidget#copyList:disabled {
+    background: rgba(225, 235, 245, 185);
+    color: #7f93a8;
+}
+
+QLineEdit#bodySubject {
+    font-size: 12px;
+    font-weight: 600;
+}
+
+QListWidget#copyList::item {
+    padding: 5px 8px;
+    border-radius: 6px;
+}
+
+QListWidget#copyList {
+    alternate-background-color: rgba(232, 246, 255, 205);
+}
+
+QListWidget#copyList::item:selected {
+    background: rgba(30, 144, 255, 155);
+    color: #062a52;
+}
+
+QTableWidget#confirmTable {
+    alternate-background-color: rgba(232, 246, 255, 205);
+    gridline-color: rgba(10, 77, 140, 35);
+}
+
+QTableWidget#confirmTable::item {
+    padding: 4px 6px;
+}
+
+QTableWidget#confirmTable::item:selected {
+    background: rgba(30, 144, 255, 120);
+    color: #062a52;
+}
+
+QHeaderView::section {
+    background: qlineargradient(
+        x1:0, y1:0, x2:0, y2:1,
+        stop:0 rgba(245, 252, 255, 245),
+        stop:1 rgba(190, 228, 248, 235)
+    );
+    color: #06345c;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 6px;
+    border: none;
+    border-right: 1px solid rgba(10, 77, 140, 45);
+    border-bottom: 1px solid rgba(10, 77, 140, 55);
+}
+
+QTableCornerButton::section {
+    background: rgba(210, 236, 250, 235);
+    border: none;
+}
+
+QCheckBox {
+    color: #06345c;
+    font-size: 12px;
+    font-weight: 600;
+    spacing: 7px;
+}
+
+QToolButton#formatButton {
+    color: #06345c;
+    background: qlineargradient(
+        x1:0, y1:0, x2:0, y2:1,
+        stop:0 rgba(255, 255, 255, 245),
+        stop:1 rgba(206, 238, 252, 235)
+    );
+    border: 1px solid rgba(255, 255, 255, 240);
+    border-radius: 6px;
+    min-width: 26px;
+    min-height: 24px;
+}
+
+QToolButton#formatButton:hover {
+    background: rgba(235, 250, 255, 245);
+}
+
+QToolButton#formatButton:pressed {
+    background: rgba(30, 144, 255, 190);
+}
+
+/* ------------------------------------------------------------------ */
+/* Diálogo de confirmação e contadores                                 */
+/* ------------------------------------------------------------------ */
+QDialog {
+    background: qlineargradient(
+        x1:0, y1:0, x2:0, y2:1,
+        stop:0 rgba(250, 254, 255, 252),
+        stop:1 rgba(214, 238, 252, 250)
+    );
+}
+
+QLabel#dialogTitle {
+    color: #062a52;
+    font-size: 17px;
+    font-weight: 700;
+}
+
+QLabel#dialogSubtitle {
+    color: #2d5677;
+    font-size: 11px;
+}
+
+QLabel#dialogSelection {
+    color: #0a4d8c;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+QLabel#previewSubject {
+    color: #06345c;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 1px 2px;
+}
+
+QLabel#previewRecipients {
+    color: #2d5677;
+    font-size: 10px;
+    padding: 0px 2px 2px 2px;
+}
+
+QTextEdit#previewBody {
+    background: rgba(255, 255, 255, 238);
+    color: #0b2b46;
+    border: 1px solid rgba(255, 255, 255, 240);
+    border-radius: 8px;
+    padding: 5px 7px;
+}
+
+QLabel#countChip {
+    background: rgba(255, 255, 255, 215);
+    border: 1px solid rgba(255, 255, 255, 245);
+    border-radius: 9px;
+    color: #06345c;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 5px 12px;
+    min-width: 100px;
+}
+
+QPlainTextEdit#dialogWarnings {
+    background: rgba(255, 248, 219, 235);
+    color: #6b4b00;
+    border: 1px solid rgba(220, 190, 90, 180);
+    border-radius: 8px;
+    padding: 5px 7px;
+    font-size: 10px;
+}
+
+QScrollBar:horizontal {
+    background: rgba(255, 255, 255, 40);
+    height: 11px;
+    margin: 0px;
+    border: none;
+}
+
+QScrollBar::handle:horizontal {
+    background: rgba(127, 212, 255, 190);
+    min-width: 28px;
+    border-radius: 5px;
+}
+
+QScrollBar::handle:horizontal:hover {
+    background: rgba(190, 235, 255, 235);
+}
+
+QScrollBar::add-line:horizontal,
+QScrollBar::sub-line:horizontal {
+    width: 0px;
+}
+
+QScrollBar::add-page:horizontal,
+QScrollBar::sub-page:horizontal {
+    background: transparent;
+}
 """

@@ -23,6 +23,7 @@ from PyQt6.QtGui import QFont  # noqa: E402
 from PyQt6.QtWidgets import QApplication  # noqa: E402
 
 from testes.smoke_test import _build_fixtures  # noqa: E402
+from ui import envios_tab as envios_tab_module  # noqa: E402
 from ui import main_window as main_window_module  # noqa: E402
 from ui.main_window import MainWindow  # noqa: E402
 from ui.theme import APP_FONT, build_stylesheet  # noqa: E402
@@ -45,6 +46,7 @@ class _FakeSettings:
 
 def main() -> int:
     main_window_module.QSettings = _FakeSettings  # type: ignore[assignment]
+    envios_tab_module.QSettings = _FakeSettings  # type: ignore[assignment]
 
     with tempfile.TemporaryDirectory() as tmp:
         base = Path(tmp)

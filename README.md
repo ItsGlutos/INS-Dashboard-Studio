@@ -1,22 +1,30 @@
 # INS Dashboard Studio
 
-Aplicativo desktop (Windows) que gera, em lote, os dashboards **INS do
-Motorista** e **INS do Transportador** a partir das planilhas de origem e dos
-templates do Excel.
+Aplicativo desktop (Windows) para a rotina mensal de **INS**:
+
+1. **Geração de dashboards** — cria, em lote, os dashboards **INS do Motorista**
+   e **INS do Transportador** a partir das planilhas de origem e dos templates
+   do Excel.
+2. **Envios de INS** — envia por e-mail, via Outlook Desktop, o dashboard de
+   cada transportadora, com assunto e corpo editáveis, cópia (CC) e
+   confirmação antes de qualquer disparo.
 
 A interface foi construída em **PyQt6** com estética *Frutiger Aero* (vidro,
-céu em degradê e botões glossy). O processamento usa **pandas + xlwings** para
-preencher o template no Microsoft Excel e salvar um arquivo por
-motorista/transportadora.
+céu em degradê e botões glossy). O processamento dos dashboards usa
+**pandas + xlwings** para preencher o template no Microsoft Excel e salvar um
+arquivo por motorista/transportadora. Os envios usam **pywin32** para falar com
+o Outlook.
 
-> Os notebooks originais (`Dashboards_Motorista.ipynb` e
-> `Dashboards_Transportador.ipynb`) **não são modificados**. Este projeto é uma
-> pasta separada que reproduz a mesma lógica.
+> Os notebooks originais (`EnviosINS_Motorista.ipynb` e
+> `EnviosINS_Transportador.ipynb`) **não são modificados**. Este projeto é uma
+> pasta separada que reproduz a mesma lógica em uma aplicação.
 
 ## Requisitos
 
 - Windows 10/11
-- Microsoft Excel instalado (a automação usa o Excel via COM)
+- Microsoft Excel instalado (a geração usa o Excel via COM)
+- Microsoft Outlook Desktop instalado e com um perfil de e-mail configurado
+  (necessário apenas para a aba **Envios**)
 - Python 3.11+ (testado com 3.14)
 
 Instale as dependências:
@@ -25,6 +33,10 @@ Instale as dependências:
 cd ins_dashboard_app
 pip install -r requirements.txt
 ```
+
+O `pywin32` é instalado apenas no Windows e é obrigatório para o envio real.
+Sem ele, a aba **Envios** abre e planeja normalmente, mas o disparo falha com
+uma mensagem explicando o que instalar.
 
 ## Como executar
 
@@ -35,7 +47,11 @@ python main.py
 
 ou dê duplo clique em `iniciar.bat`.
 
-## Como usar
+A janela principal tem duas abas: **Geração de dashboards** e
+**Envios de INS**. As preferências de cada aba são lembradas entre execuções
+via `QSettings`.
+
+## Aba Geração de dashboards
 
 1. Escolha o tipo de relatório: **Motorista** ou **Transportador**.
 2. Selecione o **arquivo do relatório** (planilha `.xlsx` com a aba `INS`).
@@ -60,63 +76,126 @@ código. Os últimos caminhos usados são lembrados entre execuções.
 Durante a geração o Excel é aberto **invisível**. Evite abrir/editar os
 arquivos de origem, template ou saída enquanto o processo roda.
 
-## Interface
-
-A janela segue o estilo **Frutiger Aero** (céu em degradê com sol e bolhas,
-painéis de vidro translúcido, botões glossy), tudo desenhado em QSS/QPainter,
-sem imagens externas.
-
-- **Motorista | Transportador**: alterna o tipo de relatório e mostra a coluna
-  de agrupamento usada.
-- **Arquivo do relatório**, **Template do dashboard** e **Pasta de saída**:
-  abrem o explorador de arquivos (`QFileDialog`); o caminho completo aparece
-  no tooltip.
-- **Gerar dashboards**: executa em uma thread separada (a janela continua
+- **Gerar dashboards** executa em uma thread separada (a janela continua
   responsiva), com barra de progresso, grupo atual e log colorido.
-- **Cancelar**: interrompe entre um grupo e outro; os dashboards já salvos são
+- **Cancelar** interrompe entre um grupo e outro; os dashboards já salvos são
   mantidos.
-- **Abrir pasta de saída**: abre o resultado no Explorador de Arquivos.
+- **Abrir pasta de saída** abre o resultado no Explorador de Arquivos.
 
-As preferências (tipo de relatório e últimos caminhos) são lembradas via
-`QSettings`. Fechar a janela durante a geração pede confirmação e só encerra
-depois que o Excel é liberado.
+## Aba Envios de INS
+
+A aba reúne quatro etapas, em abas internas:
+
+### 1. Envios
+
+1. Escolha **Motorista** ou **Transportador**.
+2. Selecione a **planilha de contatos** (`.xlsx`/`.xlsm`) com as colunas
+   `Transportadora` e `E-mail`. Vários endereços na mesma célula podem ser
+   separados por `;`, `,` ou espaço.
+3. Selecione a **pasta com os arquivos INS** gerados pelo aplicativo (ou pelos
+   notebooks).
+4. Clique em **Preparar envios**.
+
+Nada é enviado nesse momento. O aplicativo cruza contatos e arquivos, monta um
+plano e abre uma **tela de confirmação** com uma linha por transportadora
+mostrando arquivo, destinatários, cópia e situação. Só as linhas marcadas e
+prontas são enviadas; a prévia do assunto e do corpo pode ser conferida antes
+do disparo.
+
+- **Modo debug (validar sem enviar)** faz todo o caminho — leitura, plano,
+  conferência e log — sem acionar o Outlook. O botão passa a se chamar
+  **Validar envios (debug)**.
+- **Cancelar** interrompe após o e-mail atual; os já enviados permanecem.
+- **Abrir pasta** abre no Explorador a pasta de arquivos selecionada.
+
+### 2. Corpo do e-mail
+
+Assunto e corpo são editáveis **por tipo de relatório**. O texto usa o marcador
+`{transportadora}`, substituído pelo nome do grupo em cada e-mail. O corpo tem
+editor com negrito, itálico e sublinhado (atalhos `Ctrl+B`, `Ctrl+I`, `Ctrl+U`),
+além de **Inserir {transportadora}** e **Restaurar padrão**.
+
+Os modelos padrão já vêm preenchidos com o texto institucional do INS do
+Motorista e do INS do Transportador, incluindo as métricas e as metas de cada
+relatório.
+
+### 3. Em cópia (CC)
+
+Lista manual de endereços que entram em **cópia em todos os envios**,
+independentemente da transportadora. É possível colar vários de uma vez,
+separados por `;`, `,` ou quebra de linha. Endereços inválidos são recusados
+na inclusão e, se escaparem, aparecem como aviso no plano.
+
+### 4. Log
+
+Cada transportadora aparece com o resultado do último envio (enviado, falho ou
+não encontrado), com contadores de **enviados**, **falhos** e
+**não encontrados**. Falhas individuais não interrompem os demais envios. O log
+pode ser **exportado para CSV** ou limpo.
+
+### Como os arquivos e contatos são emparelhados
+
+- O nome do arquivo define a transportadora: o trecho entre o prefixo
+  (`INS do Motorista - ` ou `INS do Transportador - `) e o `.xlsx` é comparado
+  com a coluna `Transportadora`.
+- A comparação ignora acentos, caixa e espaços extras — `"Ála Uber"`,
+  `"ALA  UBER"` e `"ala uber"` são o mesmo grupo.
+- Quando existem dois arquivos para a mesma transportadora, o **mais recente**
+  é usado e o outro é registrado como aviso.
+- Arquivos temporários do Excel (`~$...`) e planilhas sem o prefixo correto são
+  ignorados.
+- Cada transportadora recebe **um e-mail**, com o arquivo correspondente
+  anexado e o assunto/corpo já personalizados.
 
 ## Estrutura
 
 ```text
 ins_dashboard_app/
-├── main.py               # entrada do aplicativo
-├── iniciar.bat           # atalho para Windows
+├── main.py                  # entrada do aplicativo
+├── iniciar.bat              # atalho para Windows
 ├── requirements.txt
-├── CONTRATO_UI.md        # contrato entre backend e interface
+├── CONTRATO_UI.md           # contrato entre backend e interface
 ├── backend/
-│   ├── reports.py        # regras de cada tipo de relatório
-│   ├── models.py         # JobConfig, JobResult, erros
-│   └── processor.py      # leitura, agrupamento e automação do Excel
+│   ├── __init__.py
+│   ├── reports.py           # regras de cada tipo de relatório
+│   ├── models.py            # JobConfig, JobResult, erros
+│   ├── processor.py         # leitura, agrupamento e automação do Excel
+│   └── envios.py            # contatos, plano de envios e Outlook
 ├── ui/
-│   ├── theme.py          # paleta e QSS Frutiger Aero
-│   ├── widgets.py        # fundo, vidro, botões, seletores, log, LED
-│   ├── worker.py         # QThread que executa o backend
-│   └── main_window.py    # janela principal
+│   ├── theme.py             # paleta e QSS Frutiger Aero
+│   ├── widgets.py           # fundo, vidro, botões, checkbox, seletores, log
+│   ├── worker.py            # QThread da geração de dashboards
+│   ├── envios_worker.py     # QThread do planejamento e do envio
+│   ├── envios_dialog.py     # confirmação visual antes do disparo
+│   ├── envios_tab.py        # aba Envios de INS
+│   └── main_window.py       # janela principal (abas)
 └── testes/
-    ├── smoke_test.py     # valida o backend sem abrir o Excel
-    ├── e2e_excel.py      # geração real (requer Excel)
-    └── ui_e2e.py         # interface + thread + Excel, ponta a ponta
+    ├── smoke_test.py        # valida o backend sem abrir o Excel
+    ├── e2e_excel.py         # geração real (requer Excel)
+    ├── ui_e2e.py            # interface + thread + Excel, ponta a ponta
+    ├── envios_test.py       # lógica de envio (sem Outlook)
+    └── envios_ui_smoke.py   # aba Envios offscreen (salva captura)
 ```
-
-O subagente responsável pela interface está em
-`.opencode/agents/frontend.md` (OpenCode).
 
 ## Testes
 
 ```powershell
 cd ins_dashboard_app
-python -m testes.smoke_test    # rápido, não abre o Excel
-python -m testes.e2e_excel     # ponta a ponta, abre o Excel
-python -m testes.ui_e2e        # clica em "Gerar" na interface (offscreen)
+python -m unittest testes.envios_test -v   # envios, sem abrir o Outlook
+python -m testes.smoke_test                # geração, sem abrir o Excel
+python -m testes.envios_ui_smoke           # aba Envios offscreen
+python -m testes.e2e_excel                 # geração real, abre o Excel
+python -m testes.ui_e2e                    # clica em "Gerar" na interface
 ```
 
+O `envios_ui_smoke` usa planilhas e arquivos sintéticos, não envia e-mail e
+salva uma captura da tela em `_saida_teste/envios.png`.
+
+Os testes de envio usam um remetente falso: nenhum e-mail é disparado.
+
 ## Solução de problemas
+
+### Geração de dashboards
 
 - **"Não foi possível abrir o Microsoft Excel"**: confirme que o Excel está
   instalado e feche caixas de diálogo abertas no Excel.
@@ -130,7 +209,31 @@ python -m testes.ui_e2e        # clica em "Gerar" na interface (offscreen)
 - **Geração lenta**: cada grupo abre e fecha o template no Excel; 20 s por
   grupo é normal em máquinas mais lentas.
 
+### Envios
+
+- **"O Outlook Desktop não está disponível"**: instale o Microsoft Outlook e o
+  `pywin32` (`pip install pywin32`).
+- **"Não foi possível abrir o Outlook Desktop"**: abra o Outlook uma vez,
+  confirme que o perfil de e-mail está configurado e tente novamente.
+- **Planilha de contatos inválida**: o arquivo precisa ter as colunas
+  `Transportadora` e `E-mail` (variações como `Email` também são aceitas).
+- **Transportadora "Sem contato na planilha"**: o nome do arquivo não bate com
+  nenhuma linha da planilha. Ajuste o nome do arquivo ou o cadastro.
+- **"Sem e-mail" ou "E-mail inválido"**: o grupo aparece na confirmação, mas
+  nunca é disparado; corrija o cadastro e prepare novamente.
+- **Nenhum arquivo encontrado**: confira se a pasta é a certa e se os nomes
+  começam com `INS do Motorista - ` ou `INS do Transportador - `.
+- **Arquivo duplicado ignorado**: o aplicativo usa o mais recente da pasta e
+  informa qual foi mantido.
+- **Envio lento**: cada e-mail abre o Outlook via COM; em máquinas mais lentas
+  alguns segundos por transportadora são normais.
+
 ## Privacidade e segurança
 
-Nenhum dado sai da máquina: toda a leitura/escrita acontece localmente, via
-pandas e Excel.
+A leitura e a geração dos dashboards acontecem localmente, via pandas e Excel.
+Os envios saem apenas pelo Outlook já configurado na máquina, para os
+destinatários da planilha de contatos e para a lista de cópia — nenhum serviço
+externo é usado e nada é enviado sem a confirmação na tela de revisão.
+
+Planilhas, templates e dashboards não são versionados no repositório
+(`.gitignore` bloqueia `*.xlsx`), assim como pastas de teste e caches.

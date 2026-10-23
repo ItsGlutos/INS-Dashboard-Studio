@@ -40,6 +40,7 @@ from PyQt6.QtGui import (
     QRadialGradient,
 )
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QFileDialog,
     QFrame,
     QGraphicsDropShadowEffect,
@@ -56,6 +57,7 @@ from PyQt6.QtWidgets import (
 from .theme import LED_COLORS, LOG_COLORS
 
 __all__ = [
+    "AeroCheckBox",
     "FileSelector",
     "GlassPanel",
     "GlossyButton",
@@ -286,6 +288,95 @@ class GlossyButton(QPushButton):
         painter.setPen(QPen(QColor(255, 255, 255, 220), 2))
         rect = self.rect().adjusted(1, 1, -1, -1)
         painter.drawRoundedRect(rect, 8, 8)
+        painter.end()
+
+
+# ---------------------------------------------------------------------------
+# Checkbox Aero
+# ---------------------------------------------------------------------------
+class AeroCheckBox(QCheckBox):
+    """Checkbox com indicador de vidro e checkmark desenhados em código.
+
+    O indicador padrão do Fusion herda cores do tema e fica ilegível sobre o
+    painel de vidro; este desenho mantém o mesmo vocabulário visual dos
+    botões glossy.
+    """
+
+    def __init__(self, text: str = "", parent: QWidget | None = None) -> None:
+        super().__init__(text, parent)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setMinimumHeight(22)
+
+    def sizeHint(self):  # noqa: N802 (API Qt)
+        """Reserva espaço extra para o indicador desenhado manualmente."""
+        hint = super().sizeHint()
+        hint.setWidth(hint.width() + 8)
+        return hint
+
+    def paintEvent(self, event) -> None:  # noqa: N802 (API Qt)
+        """Desenha o indicador e o texto sem depender do estilo do sistema."""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        box = 16.0
+        x = 2.0
+        y = (self.height() - box) / 2.0
+        rect = QRectF(x, y, box, box)
+
+        if self.isEnabled():
+            borda = QColor("#0a4d8c")
+            fundo = QColor(255, 255, 255, 235)
+        else:
+            borda = QColor("#9db2c6")
+            fundo = QColor(232, 240, 247, 210)
+
+        painter.setPen(QPen(borda, 1.2))
+        painter.setBrush(QBrush(fundo))
+        painter.drawRoundedRect(rect, 4, 4)
+
+        if self.isChecked():
+            gradiente = QLinearGradient(rect.topLeft(), rect.bottomLeft())
+            gradiente.setColorAt(0.0, QColor("#7fd4ff"))
+            gradiente.setColorAt(1.0, QColor("#1e90ff"))
+            painter.setPen(QPen(QColor("#0a4d8c"), 1.0))
+            painter.setBrush(QBrush(gradiente))
+            painter.drawRoundedRect(rect, 4, 4)
+
+            check = QPainterPath()
+            check.moveTo(x + 4.0, y + 8.0)
+            check.lineTo(x + 7.0, y + 11.0)
+            check.lineTo(x + 12.0, y + 5.0)
+            painter.setPen(
+                QPen(
+                    QColor(255, 255, 255, 245),
+                    2.0,
+                    Qt.PenStyle.SolidLine,
+                    Qt.PenCapStyle.RoundCap,
+                    Qt.PenJoinStyle.RoundJoin,
+                )
+            )
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawPath(check)
+
+        painter.setPen(
+            QColor("#06345c") if self.isEnabled() else QColor("#8fa3b6")
+        )
+        painter.setFont(self.font())
+        painter.drawText(
+            self.rect().adjusted(int(box + 8), 0, -2, 0),
+            int(
+                Qt.AlignmentFlag.AlignVCenter
+                | Qt.AlignmentFlag.AlignLeft
+            ),
+            self.text(),
+        )
+
+        if self.hasFocus():
+            painter.setPen(
+                QPen(QColor(30, 144, 255, 170), 1, Qt.PenStyle.DotLine)
+            )
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(rect.adjusted(-2, -2, 2, 2), 5, 5)
         painter.end()
 
 

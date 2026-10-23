@@ -21,12 +21,14 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QSizePolicy,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from backend import JobConfig, JobError, JobResult, get_report_type
 
+from .envios_tab import EnviosTab
 from .widgets import (
     FileSelector,
     GlassPanel,
@@ -54,8 +56,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("INS Dashboard Studio")
         self.setWindowIcon(create_app_icon())
-        self.setMinimumSize(940, 720)
-        self.resize(1000, 760)
+        self.setMinimumSize(1000, 740)
+        self.resize(1180, 860)
 
         self._settings = QSettings("INS", "INS Dashboard Studio")
         self._cancel_flag = threading.Event()
@@ -85,12 +87,22 @@ class MainWindow(QMainWindow):
 
         outer.addWidget(self._build_header())
 
-        body = QHBoxLayout()
-        body.setSpacing(12)
-        body.addWidget(self._build_config_panel(), 0)
-        body.addWidget(self._build_run_panel(), 1)
-        outer.addLayout(body, 1)
+        self._tabs = QTabWidget(background)
+        self._tabs.setObjectName("mainTabs")
+        self._tabs.setDocumentMode(True)
 
+        geracao = QWidget(self._tabs)
+        geracao_layout = QHBoxLayout(geracao)
+        geracao_layout.setContentsMargins(0, 0, 0, 0)
+        geracao_layout.setSpacing(12)
+        geracao_layout.addWidget(self._build_config_panel(), 0)
+        geracao_layout.addWidget(self._build_run_panel(), 1)
+        self._tabs.addTab(geracao, "Geração de dashboards")
+
+        self._envios_tab = EnviosTab(self._tabs)
+        self._tabs.addTab(self._envios_tab, "Envios de INS")
+
+        outer.addWidget(self._tabs, 1)
         outer.addWidget(self._build_footer())
 
     def _build_header(self) -> QWidget:
@@ -118,7 +130,7 @@ class MainWindow(QMainWindow):
         title = QLabel("INS Dashboard Studio", panel)
         title.setObjectName("appTitle")
         subtitle = QLabel(
-            "Geração automática de dashboards INS por motorista ou transportadora",
+            "Geração de dashboards INS e envio dos relatórios por transportadora",
             panel,
         )
         subtitle.setObjectName("appSubtitle")
@@ -322,7 +334,9 @@ class MainWindow(QMainWindow):
         layout.addWidget(left)
         layout.addStretch(1)
 
-        right = QLabel("Microsoft Excel necessário para a geração", footer)
+        right = QLabel(
+            "Excel para gerar dashboards · Outlook para os envios", footer
+        )
         right.setObjectName("sectionHint")
         layout.addWidget(right)
         return footer
@@ -383,6 +397,7 @@ class MainWindow(QMainWindow):
         self._settings.setValue(
             _SETTING_OUTPUT, self._output_selector.path
         )
+        self._envios_tab.save_settings()
 
     # ------------------------------------------------------------------
     # Execução
@@ -635,6 +650,16 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     def closeEvent(self, event) -> None:  # noqa: N802 (API Qt)
         """Fecha a janela com segurança durante uma geração em andamento."""
+        if self._envios_tab.is_running:
+            QMessageBox.information(
+                self,
+                "Envio em andamento",
+                "Aguarde a conclusão do envio ou use o botão Cancelar na "
+                "aba Envios antes de fechar o aplicativo.",
+            )
+            event.ignore()
+            return
+
         if self._running:
             resposta = QMessageBox.question(
                 self,
