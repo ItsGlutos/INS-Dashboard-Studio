@@ -7,10 +7,22 @@ pronto e testado**; a interface apenas o consome.
 
 ```text
 ins_dashboard_app/
-├── main.py              # entrada do app (criada pelo frontend)
-├── backend/             # NÃO ALTERAR (pandas + xlwings)
-├── ui/                  # interface PyQt6 (criada pelo frontend)
-├── testes/              # testes do backend
+├── main.py              # entrada do app
+├── backend/             # pandas + xlwings + Outlook (não alterar pela UI)
+│   ├── __init__.py
+│   ├── reports.py
+│   ├── models.py
+│   ├── processor.py
+│   └── envios.py
+├── ui/                  # interface PyQt6
+│   ├── theme.py
+│   ├── widgets.py
+│   ├── worker.py
+│   ├── envios_worker.py
+│   ├── envios_dialog.py
+│   ├── envios_tab.py
+│   └── main_window.py
+├── testes/              # testes do backend e smoke tests da UI
 └── requirements.txt
 ```
 
@@ -64,6 +76,27 @@ Níveis de log: `"info"`, `"success"`, `"warning"`, `"error"`.
 **`run()` é bloqueante e usa COM/Excel: execute SEMPRE em uma thread
 trabalhadora** (QThread), nunca na thread da GUI.
 
+### Envios (`from backend.envios import ...`)
+
+```python
+ler_contatos(caminho)          # dict[str, Contato] (Transportadora + E-mail)
+localizar_arquivos(pasta, key) # list[ArquivoINS] pelos prefixos INS do ...
+montar_plano(report_key, contatos_path, pasta_arquivos,
+             copia_manual=None, assunto=None, corpo=None)  # PlanoEnvios
+enviar_plano(plano, chaves, sender_factory=None,
+             on_progress=None, on_log=None,
+             should_cancel=None)  # EnvioResultado
+```
+
+- `PlanoEnvios.grupos` traz `status` (`pronto`, `sem_contato`, `sem_email`,
+  `email_invalido`), `para`, `copia`, `assunto`, `corpo` e `arquivo`.
+- `OutlookSender` abre o Outlook via `pywin32`; `enviar_plano` aceita um
+  `sender_factory` falso nos testes.
+- `montar_plano` e `enviar_plano` são bloqueantes: executar em `PlanWorker` e
+  `SendWorker` (`ui/envios_worker.py`), nunca na thread da GUI.
+- Nada é enviado antes da confirmação em `EnviosConfirmDialog`; em modo debug
+  o diálogo apenas valida.
+
 ## Requisitos funcionais da UI
 
 1. Seletor do tipo de relatório: **Motorista** vs **Transportador**, com
@@ -85,18 +118,47 @@ trabalhadora** (QThread), nunca na thread da GUI.
 10. Persistir última pasta/arquivos e tipo de relatório com `QSettings`
     (opcional, mas recomendado).
 
+### Aba Envios de INS
+
+1. Abas internas **Envios**, **Corpo do e-mail**, **Em cópia (CC)** e **Log**.
+2. Seletores da **planilha de contatos** e da **pasta com os arquivos INS**.
+3. **Preparar envios** monta o plano sem disparar nada e abre a confirmação.
+4. Confirmação com tabela por transportadora (arquivo, para, cópia, situação),
+   prévia de assunto/corpo e seleção individual; **só os grupos marcados e
+   prontos** são enviados.
+5. **Modo debug** valida tudo e registra no log sem acionar o Outlook.
+6. Assunto e corpo editáveis por tipo, com `{transportadora}`, formatação
+   básica e restauração do texto padrão.
+7. Lista de cópia (CC) aplicada a todos os envios, com validação de e-mail.
+8. Log por transportadora, contadores e exportação para CSV.
+9. **Cancelar** interrompe após o e-mail atual; fechar a janela durante um
+   envio é bloqueado.
+
+## Acessibilidade e responsividade
+
+- Nome acessível (`setAccessibleName`) em botões, campos, tabelas, listas,
+  abas e indicadores; descrições nos controles não óbvios.
+- Ordem de foco explícita no diálogo (`select_all` → tabela → prévia →
+  Cancelar → Confirmar) e indicador de foco visível com contraste reforçado.
+- Alvos de clique com pelo menos 24×24 px (checkbox, limpar seleção, botões).
+- `Espaço`/`Enter` alternam a transportadora selecionada na tabela.
+- Janela mínima de 860×480, dimensionada pela área útil da tela; conteúdo das
+  abas e prévia do diálogo em `QScrollArea` para não cortar em telas baixas.
+- Cores de texto e status com contraste legível sobre os painéis de vidro.
+
 ## Requisitos técnicos
 
-- PyQt6, Python 3.14, Windows.
+- PyQt6, Python 3.11+, Windows.
 - `main.py` cria `QApplication`, define estilo `Fusion` + QSS, fonte
-  "Segoe UI", abre `MainWindow` centralizada (~1000x760) e roda o loop.
+  "Segoe UI", abre `MainWindow` centralizada e roda o loop.
 - Separação em módulos: `ui/theme.py` (QSS/cores), `ui/widgets.py`
-  (componentes reutilizáveis), `ui/worker.py` (QThread), `ui/main_window.py`.
+  (componentes reutilizáveis), `ui/worker.py` e `ui/envios_worker.py`
+  (QThread), `ui/envios_tab.py`, `ui/envios_dialog.py` e
+  `ui/main_window.py`.
 - Nada de caminhos fixos de arquivos: **toda** seleção de arquivo/pasta passa
   por `QFileDialog`.
-- Nenhuma dependência além de PyQt6 (e o backend).
 - Sem assets externos: desenhe fundo/ícones com `QPainter`/QSS.
-- Não alterar `backend/`, `testes/`, `requirements.txt` nem os `.ipynb`.
+- Não alterar os `.ipynb`.
 
 ## Direção visual: Frutiger Aero (anos 2000 / Windows Vista-7)
 
@@ -127,3 +189,8 @@ trabalhadora** (QThread), nunca na thread da GUI.
 
 - Nenhuma chamada ao backend na thread da GUI.
 - Os quatro controles exigidos existem e abrem `QFileDialog`.
+- Aba Envios e diálogo de confirmação validados sem Outlook:
+
+  ```powershell
+  python -m testes.envios_ui_smoke
+  ```

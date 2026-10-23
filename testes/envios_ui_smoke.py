@@ -18,7 +18,9 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pandas as pd  # noqa: E402
+from PyQt6.QtCore import Qt  # noqa: E402
 from PyQt6.QtGui import QFont  # noqa: E402
+from PyQt6.QtTest import QTest  # noqa: E402
 from PyQt6.QtWidgets import QApplication, QDialog  # noqa: E402
 
 from backend.envios import montar_plano  # noqa: E402
@@ -171,7 +173,7 @@ def main() -> int:
         assert dialog._preview_subject.text().startswith("Alfa"), (
             dialog._preview_subject.text()
         )
-        assert "Alfa" in dialog._preview_body.toPlainText()
+        assert "Alfa" in dialog._preview_body.text()
         assert "copia@gruposc.com.br" in dialog._preview_recipients.text(), (
             dialog._preview_recipients.text()
         )
@@ -180,6 +182,61 @@ def main() -> int:
             dialog._preview_subject.text()
         )
         dialog.table.selectRow(0)
+
+        # ---- proporções, rolagem e acessibilidade do diálogo -----------
+        dialog.show()
+        app.processEvents()
+        dialog.resize(760, 480)
+        app.processEvents()
+        assert dialog.minimumWidth() <= 760, dialog.minimumWidth()
+        assert dialog.minimumHeight() <= 480, dialog.minimumHeight()
+        assert getattr(dialog, "_scroll", None) is not None
+        assert dialog._scroll.widgetResizable()
+        assert dialog._scroll.verticalScrollBar().maximum() > 0, (
+            "o conteúdo precisa rolar em telas baixas"
+        )
+        assert dialog.confirm_button.isVisible()
+        assert dialog.confirm_button.geometry().bottom() <= dialog.height(), (
+            dialog.confirm_button.geometry(),
+            dialog.height(),
+        )
+        assert dialog.confirm_button.accessibleName()
+        assert dialog.table.accessibleName()
+        assert dialog.select_all.accessibleName()
+        assert dialog._checks[0].accessibleName()
+        assert dialog._checks[0].minimumWidth() >= 24
+        assert dialog._checks[0].minimumHeight() >= 24
+        assert dialog.select_all.minimumWidth() >= 24
+        assert dialog.select_all.minimumHeight() >= 24
+        assert envios._contacts_selector._clear_button.width() >= 24
+        assert envios._contacts_selector._clear_button.height() >= 24
+
+        # ---- ordem de foco lógica --------------------------------------
+        dialog.select_all.setFocus()
+        QTest.keyClick(dialog.select_all, Qt.Key.Key_Tab)
+        assert dialog.table.hasFocus(), "Tab deve ir do topo para a tabela"
+        QTest.keyClick(dialog.table, Qt.Key.Key_Tab)
+        assert dialog._scroll.hasFocus(), "Tab deve sair da tabela para a prévia"
+        QTest.keyClick(dialog._scroll, Qt.Key.Key_Tab)
+        assert dialog.cancel_button.hasFocus(), "Tab deve chegar ao Cancelar"
+        QTest.keyClick(dialog.cancel_button, Qt.Key.Key_Tab)
+        assert dialog.confirm_button.hasFocus(), "Tab deve chegar ao Confirmar"
+
+        # ---- operação por teclado na tabela ----------------------------
+        dialog.table.setFocus()
+        dialog.table.selectRow(0)
+        assert dialog._checks[0].isChecked()
+        QTest.keyClick(dialog.table, Qt.Key.Key_Space)
+        assert not dialog._checks[0].isChecked()
+        assert "alfa" not in dialog.selected_keys(), dialog.selected_keys()
+        QTest.keyClick(dialog.table, Qt.Key.Key_Space)
+        assert dialog._checks[0].isChecked()
+        assert "alfa" in dialog.selected_keys(), dialog.selected_keys()
+
+        capturas = Path("_saida_teste")
+        capturas.mkdir(exist_ok=True)
+        dialog.grab().save(str(capturas / "envios_dialogo_baixo.png"))
+        dialog.close()
 
         dialog._checks[0].setChecked(False)
         assert dialog.selected_keys() == ["beta"], dialog.selected_keys()

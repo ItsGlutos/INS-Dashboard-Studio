@@ -147,6 +147,19 @@ pode ser **exportado para CSV** ou limpo.
 - Cada transportadora recebe **um e-mail**, com o arquivo correspondente
   anexado e o assunto/corpo já personalizados.
 
+## Acessibilidade e telas pequenas
+
+- A janela abre ajustada à área útil da tela (mínimo 860×480) e o conteúdo das
+  abas rola quando falta espaço; nada fica cortado em notebooks menores.
+- O diálogo de confirmação também se adapta à tela, mantém os botões sempre
+  visíveis e rola a prévia do e-mail.
+- Navegação por teclado: `Tab` percorre os controles na ordem lógica e
+  `Espaço`/`Enter` marcam ou desmarcam a transportadora selecionada na tabela.
+- Controles têm nome acessível e os campos exibem anel de foco com contraste
+  reforçado, incluindo botões, abas, tabelas e listas.
+- Cores de status, botões e textos foram ajustadas para manter contraste
+  legível sobre os painéis de vidro.
+
 ## Estrutura
 
 ```text
@@ -189,7 +202,9 @@ python -m testes.ui_e2e                    # clica em "Gerar" na interface
 ```
 
 O `envios_ui_smoke` usa planilhas e arquivos sintéticos, não envia e-mail e
-salva uma captura da tela em `_saida_teste/envios.png`.
+valida também proporções, rolagem, foco e nomes acessíveis do diálogo de
+confirmação. Ele salva capturas em `_saida_teste/envios.png` e
+`_saida_teste/envios_dialogo_baixo.png`.
 
 Os testes de envio usam um remetente falso: nenhum e-mail é disparado.
 

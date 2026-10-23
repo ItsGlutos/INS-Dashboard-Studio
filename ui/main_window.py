@@ -13,6 +13,7 @@ import threading
 from pathlib import Path
 
 from PyQt6.QtCore import QSettings, Qt, QThread
+from PyQt6.QtGui import QGuiApplication
 from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -20,6 +21,7 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QProgressBar,
+    QScrollArea,
     QSizePolicy,
     QTabWidget,
     QVBoxLayout,
@@ -56,8 +58,15 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("INS Dashboard Studio")
         self.setWindowIcon(create_app_icon())
-        self.setMinimumSize(1000, 740)
-        self.resize(1180, 860)
+        self.setMinimumSize(860, 480)
+        screen = QGuiApplication.primaryScreen()
+        if screen is not None:
+            disponivel = screen.availableGeometry()
+            largura = min(1180, max(860, disponivel.width() - 80))
+            altura = min(860, max(480, disponivel.height() - 80))
+            self.resize(largura, altura)
+        else:
+            self.resize(1180, 860)
 
         self._settings = QSettings("INS", "INS Dashboard Studio")
         self._cancel_flag = threading.Event()
@@ -97,7 +106,21 @@ class MainWindow(QMainWindow):
         geracao_layout.setSpacing(12)
         geracao_layout.addWidget(self._build_config_panel(), 0)
         geracao_layout.addWidget(self._build_run_panel(), 1)
-        self._tabs.addTab(geracao, "Geração de dashboards")
+
+        geracao_scroll = QScrollArea(self._tabs)
+        geracao_scroll.setObjectName("contentScroll")
+        geracao_scroll.setWidgetResizable(True)
+        geracao_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        geracao_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        geracao_scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        geracao_scroll.setAccessibleName("Conteúdo da geração de dashboards")
+        geracao_scroll.viewport().setObjectName("contentScrollViewport")
+        geracao_scroll.setWidget(geracao)
+        self._tabs.addTab(geracao_scroll, "Geração de dashboards")
 
         self._envios_tab = EnviosTab(self._tabs)
         self._tabs.addTab(self._envios_tab, "Envios de INS")

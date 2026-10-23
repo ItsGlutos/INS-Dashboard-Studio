@@ -40,6 +40,7 @@ from PyQt6.QtGui import (
     QRadialGradient,
 )
 from PyQt6.QtWidgets import (
+    QButtonGroup,
     QCheckBox,
     QFileDialog,
     QFrame,
@@ -276,18 +277,25 @@ class GlossyButton(QPushButton):
         self.setObjectName(variant)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        if text:
+            self.setAccessibleName(text)
 
     def paintEvent(self, event) -> None:  # noqa: N802 (API Qt)
-        """Desenha o QSS e um contorno sutil de foco."""
+        """Desenha o QSS e um contorno de foco com contraste suficiente."""
         super().paintEvent(event)
         if not self.hasFocus():
             return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.setPen(QPen(QColor(255, 255, 255, 220), 2))
-        rect = self.rect().adjusted(1, 1, -1, -1)
-        painter.drawRoundedRect(rect, 8, 8)
+        painter.setPen(QPen(QColor(255, 255, 255, 220), 1))
+        painter.drawRoundedRect(
+            self.rect().adjusted(0, 0, -1, -1), 9, 9
+        )
+        painter.setPen(QPen(QColor("#06345c"), 2))
+        painter.drawRoundedRect(
+            self.rect().adjusted(2, 2, -2, -2), 8, 8
+        )
         painter.end()
 
 
@@ -305,12 +313,15 @@ class AeroCheckBox(QCheckBox):
     def __init__(self, text: str = "", parent: QWidget | None = None) -> None:
         super().__init__(text, parent)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setMinimumHeight(22)
+        self.setMinimumSize(26, 26)
+        if text:
+            self.setAccessibleName(text)
 
     def sizeHint(self):  # noqa: N802 (API Qt)
         """Reserva espaço extra para o indicador desenhado manualmente."""
         hint = super().sizeHint()
-        hint.setWidth(hint.width() + 8)
+        hint.setWidth(hint.width() + 10)
+        hint.setHeight(max(26, hint.height()))
         return hint
 
     def paintEvent(self, event) -> None:  # noqa: N802 (API Qt)
@@ -318,8 +329,8 @@ class AeroCheckBox(QCheckBox):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
-        box = 16.0
-        x = 2.0
+        box = 18.0
+        x = 3.0
         y = (self.height() - box) / 2.0
         rect = QRectF(x, y, box, box)
 
@@ -327,29 +338,29 @@ class AeroCheckBox(QCheckBox):
             borda = QColor("#0a4d8c")
             fundo = QColor(255, 255, 255, 235)
         else:
-            borda = QColor("#9db2c6")
+            borda = QColor("#7f93a8")
             fundo = QColor(232, 240, 247, 210)
 
-        painter.setPen(QPen(borda, 1.2))
+        painter.setPen(QPen(borda, 1.5))
         painter.setBrush(QBrush(fundo))
         painter.drawRoundedRect(rect, 4, 4)
 
         if self.isChecked():
             gradiente = QLinearGradient(rect.topLeft(), rect.bottomLeft())
-            gradiente.setColorAt(0.0, QColor("#7fd4ff"))
-            gradiente.setColorAt(1.0, QColor("#1e90ff"))
-            painter.setPen(QPen(QColor("#0a4d8c"), 1.0))
+            gradiente.setColorAt(0.0, QColor("#1e78bf"))
+            gradiente.setColorAt(1.0, QColor("#0a4d8c"))
+            painter.setPen(QPen(QColor("#06345c"), 1.0))
             painter.setBrush(QBrush(gradiente))
             painter.drawRoundedRect(rect, 4, 4)
 
             check = QPainterPath()
-            check.moveTo(x + 4.0, y + 8.0)
-            check.lineTo(x + 7.0, y + 11.0)
-            check.lineTo(x + 12.0, y + 5.0)
+            check.moveTo(x + 5.0, y + 9.0)
+            check.lineTo(x + 8.0, y + 12.0)
+            check.lineTo(x + 14.0, y + 6.0)
             painter.setPen(
                 QPen(
                     QColor(255, 255, 255, 245),
-                    2.0,
+                    2.2,
                     Qt.PenStyle.SolidLine,
                     Qt.PenCapStyle.RoundCap,
                     Qt.PenJoinStyle.RoundJoin,
@@ -359,11 +370,11 @@ class AeroCheckBox(QCheckBox):
             painter.drawPath(check)
 
         painter.setPen(
-            QColor("#06345c") if self.isEnabled() else QColor("#8fa3b6")
+            QColor("#06345c") if self.isEnabled() else QColor("#5f7387")
         )
         painter.setFont(self.font())
         painter.drawText(
-            self.rect().adjusted(int(box + 8), 0, -2, 0),
+            self.rect().adjusted(int(x + box + 8), 0, -2, 0),
             int(
                 Qt.AlignmentFlag.AlignVCenter
                 | Qt.AlignmentFlag.AlignLeft
@@ -373,7 +384,7 @@ class AeroCheckBox(QCheckBox):
 
         if self.hasFocus():
             painter.setPen(
-                QPen(QColor(30, 144, 255, 170), 1, Qt.PenStyle.DotLine)
+                QPen(QColor("#06345c"), 2, Qt.PenStyle.SolidLine)
             )
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRoundedRect(rect.adjusted(-2, -2, 2, 2), 5, 5)
@@ -397,6 +408,8 @@ class SegmentedSelector(QWidget):
         super().__init__(parent)
         self._buttons: dict[str, QPushButton] = {}
         self._current = ""
+        self._group = QButtonGroup(self)
+        self._group.setExclusive(True)
 
         frame = QFrame(self)
         frame.setObjectName("segmentFrame")
@@ -407,9 +420,12 @@ class SegmentedSelector(QWidget):
         for key, label in options:
             button = QPushButton(label, frame)
             button.setObjectName("segmentButton")
-            button.setCheckable(False)
+            button.setCheckable(True)
+            button.setAccessibleName(label)
+            button.setAccessibleDescription("Tipo de relatório")
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.clicked.connect(lambda _=False, k=key: self.set_current(k))
+            self._group.addButton(button)
             layout.addWidget(button)
             self._buttons[key] = button
 
@@ -436,6 +452,7 @@ class SegmentedSelector(QWidget):
         for button_key, button in self._buttons.items():
             active = button_key == key
             button.setProperty("active", "true" if active else "false")
+            button.setChecked(active)
             button.style().unpolish(button)
             button.style().polish(button)
         if emit and changed:
@@ -488,9 +505,11 @@ class FileSelector(QWidget):
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
         )
         self._path_label.setMinimumWidth(40)
+        self._path_label.setAccessibleDescription(caption)
 
         self._browse_button = QPushButton(button_text, self._field)
         self._browse_button.setObjectName("miniButton")
+        self._browse_button.setAccessibleName(f"{button_text} — {caption}")
         self._browse_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self._browse_button.clicked.connect(self._open_dialog)
 
@@ -498,10 +517,12 @@ class FileSelector(QWidget):
         self._clear_button.setObjectName("clearButton")
         self._clear_button.setText("✕")
         self._clear_button.setToolTip("Limpar seleção")
-        self._clear_button.setFixedSize(20, 20)
+        self._clear_button.setAccessibleName(f"Limpar seleção — {caption}")
+        self._clear_button.setFixedSize(24, 24)
         self._clear_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self._clear_button.clicked.connect(self.clear)
         self._clear_button.setEnabled(False)
+        caption_label.setBuddy(self._browse_button)
 
         field_layout.addWidget(self._path_label, 1)
         field_layout.addWidget(self._browse_button)
@@ -627,6 +648,10 @@ class LogView(QWidget):
         self._view.setReadOnly(True)
         self._view.setMaximumBlockCount(800)
         self._view.setFont(QFont("Consolas", 9))
+        self._view.setAccessibleName("Log de mensagens")
+        self._view.setAccessibleDescription(
+            "Mensagens de status, sucesso, aviso e erro."
+        )
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -671,6 +696,10 @@ class StatusLed(QWidget):
         self.setFixedSize(18, 18)
         self._state = "idle"
         self._pulse = 0.0
+        self.setAccessibleName("Indicador visual de status")
+        self.setAccessibleDescription(
+            "Informativo. O texto de status ao lado descreve o estado atual."
+        )
         self._animation = QPropertyAnimation(self, b"pulse", self)
         self._animation.setDuration(900)
         self._animation.setLoopCount(-1)
@@ -681,6 +710,14 @@ class StatusLed(QWidget):
     def set_state(self, state: str) -> None:
         """Define o estado visual: idle, running, ok, error ou cancelled."""
         self._state = state if state in LED_COLORS else "idle"
+        rotulos = {
+            "idle": "Parado",
+            "running": "Em execução",
+            "ok": "Concluído",
+            "error": "Erro",
+            "cancelled": "Cancelado",
+        }
+        self.setToolTip(rotulos[self._state])
         self.update()
 
     @property

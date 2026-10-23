@@ -37,13 +37,13 @@ LOG_COLORS: dict[str, str] = {
     "error": "#ff9d9d",
 }
 
-# Cores do indicador de status (LED)
+# Cores do indicador de status (LED), escuras o bastante para 3:1 no vidro.
 LED_COLORS: dict[str, str] = {
-    "idle": "#7f93a8",
-    "running": "#ffd97a",
-    "ok": "#63d8c4",
-    "error": "#ff7b7b",
-    "cancelled": "#ffb366",
+    "idle": "#5c748c",
+    "running": "#9a6700",
+    "ok": "#0f766e",
+    "error": "#b42318",
+    "cancelled": "#b45309",
 }
 
 
@@ -81,7 +81,7 @@ QFrame#headerPanel {
         x1:0, y1:0, x2:1, y2:1,
         stop:0 rgba(4, 32, 64, 235),
         stop:0.55 rgba(10, 77, 140, 220),
-        stop:1 rgba(31, 144, 255, 190)
+        stop:1 rgba(13, 86, 143, 220)
     );
     border: 1px solid rgba(190, 235, 255, 200);
     border-radius: 16px;
@@ -135,7 +135,7 @@ QLabel#fieldPath {
 }
 
 QLabel#fieldPath[empty="true"] {
-    color: #6d8aa3;
+    color: #4a6a86;
     font-style: italic;
 }
 
@@ -186,8 +186,8 @@ QPushButton#glossButton {
         x1:0, y1:0, x2:0, y2:1,
         stop:0 rgba(255, 255, 255, 250),
         stop:0.48 rgba(226, 245, 255, 245),
-        stop:0.52 rgba(120, 200, 245, 240),
-        stop:1 rgba(30, 144, 255, 235)
+        stop:0.52 rgba(150, 215, 250, 240),
+        stop:1 rgba(107, 200, 255, 235)
     );
 }
 
@@ -196,18 +196,17 @@ QPushButton#glossButton:hover {
         x1:0, y1:0, x2:0, y2:1,
         stop:0 rgba(255, 255, 255, 255),
         stop:0.48 rgba(240, 252, 255, 250),
-        stop:0.52 rgba(150, 215, 250, 245),
-        stop:1 rgba(56, 165, 255, 240)
+        stop:0.52 rgba(170, 225, 255, 245),
+        stop:1 rgba(127, 212, 255, 240)
     );
 }
 
 QPushButton#glossButton:pressed {
+    color: #f5fbff;
     background: qlineargradient(
         x1:0, y1:0, x2:0, y2:1,
-        stop:0 rgba(190, 225, 245, 240),
-        stop:0.48 rgba(150, 205, 240, 235),
-        stop:0.52 rgba(30, 130, 235, 235),
-        stop:1 rgba(10, 77, 140, 235)
+        stop:0 rgba(6, 52, 92, 245),
+        stop:1 rgba(10, 77, 140, 245)
     );
 }
 
@@ -233,8 +232,8 @@ QPushButton#primaryButton {
         x1:0, y1:0, x2:0, y2:1,
         stop:0 rgba(255, 255, 255, 250),
         stop:0.48 rgba(216, 251, 243, 248),
-        stop:0.52 rgba(99, 216, 196, 245),
-        stop:1 rgba(20, 150, 135, 240)
+        stop:0.52 rgba(120, 229, 211, 245),
+        stop:1 rgba(76, 199, 181, 240)
     );
 }
 
@@ -243,18 +242,17 @@ QPushButton#primaryButton:hover {
         x1:0, y1:0, x2:0, y2:1,
         stop:0 rgba(255, 255, 255, 255),
         stop:0.48 rgba(232, 255, 250, 252),
-        stop:0.52 rgba(128, 235, 215, 250),
-        stop:1 rgba(30, 175, 155, 245)
+        stop:0.52 rgba(150, 240, 224, 250),
+        stop:1 rgba(102, 216, 198, 245)
     );
 }
 
 QPushButton#primaryButton:pressed {
+    color: #f5fbff;
     background: qlineargradient(
         x1:0, y1:0, x2:0, y2:1,
-        stop:0 rgba(190, 235, 225, 240),
-        stop:0.48 rgba(140, 220, 205, 235),
-        stop:0.52 rgba(30, 160, 140, 235),
-        stop:1 rgba(10, 110, 98, 235)
+        stop:0 rgba(10, 110, 98, 245),
+        stop:1 rgba(6, 78, 70, 245)
     );
 }
 
@@ -278,8 +276,8 @@ QPushButton#dangerButton {
         x1:0, y1:0, x2:0, y2:1,
         stop:0 rgba(255, 255, 255, 245),
         stop:0.48 rgba(255, 226, 226, 245),
-        stop:0.52 rgba(255, 170, 170, 240),
-        stop:1 rgba(214, 92, 92, 235)
+        stop:0.52 rgba(255, 190, 190, 240),
+        stop:1 rgba(255, 154, 154, 235)
     );
 }
 
@@ -288,8 +286,17 @@ QPushButton#dangerButton:hover {
         x1:0, y1:0, x2:0, y2:1,
         stop:0 rgba(255, 255, 255, 255),
         stop:0.48 rgba(255, 236, 236, 250),
-        stop:0.52 rgba(255, 190, 190, 245),
-        stop:1 rgba(228, 110, 110, 240)
+        stop:0.52 rgba(255, 205, 205, 245),
+        stop:1 rgba(255, 179, 179, 240)
+    );
+}
+
+QPushButton#dangerButton:pressed {
+    color: #f5fbff;
+    background: qlineargradient(
+        x1:0, y1:0, x2:0, y2:1,
+        stop:0 rgba(143, 29, 29, 245),
+        stop:1 rgba(92, 20, 20, 245)
     );
 }
 
@@ -313,8 +320,8 @@ QPushButton#miniButton {
         x1:0, y1:0, x2:0, y2:1,
         stop:0 rgba(255, 255, 255, 250),
         stop:0.48 rgba(232, 247, 255, 245),
-        stop:0.52 rgba(140, 210, 250, 240),
-        stop:1 rgba(30, 144, 255, 235)
+        stop:0.52 rgba(160, 220, 255, 240),
+        stop:1 rgba(107, 200, 255, 235)
     );
 }
 
@@ -323,16 +330,17 @@ QPushButton#miniButton:hover {
         x1:0, y1:0, x2:0, y2:1,
         stop:0 rgba(255, 255, 255, 255),
         stop:0.48 rgba(242, 252, 255, 250),
-        stop:0.52 rgba(170, 225, 255, 245),
-        stop:1 rgba(56, 165, 255, 240)
+        stop:0.52 rgba(180, 230, 255, 245),
+        stop:1 rgba(127, 212, 255, 240)
     );
 }
 
 QPushButton#miniButton:pressed {
+    color: #f5fbff;
     background: qlineargradient(
         x1:0, y1:0, x2:0, y2:1,
-        stop:0 rgba(190, 225, 245, 240),
-        stop:1 rgba(20, 120, 215, 235)
+        stop:0 rgba(6, 52, 92, 245),
+        stop:1 rgba(10, 77, 140, 245)
     );
 }
 
@@ -390,10 +398,10 @@ QPushButton#segmentButton[active="true"] {
     border: 1px solid rgba(255, 255, 255, 245);
     background: qlineargradient(
         x1:0, y1:0, x2:0, y2:1,
-        stop:0 rgba(120, 205, 255, 250),
-        stop:0.48 rgba(45, 155, 250, 248),
-        stop:0.52 rgba(16, 105, 195, 245),
-        stop:1 rgba(10, 77, 140, 240)
+        stop:0 rgba(26, 111, 176, 250),
+        stop:0.48 rgba(20, 102, 170, 248),
+        stop:0.52 rgba(13, 86, 143, 245),
+        stop:1 rgba(6, 52, 92, 242)
     );
 }
 
@@ -410,6 +418,7 @@ QPlainTextEdit#logView {
     border: 1px solid rgba(255, 255, 255, 90);
     border-radius: 10px;
     selection-background-color: rgba(99, 216, 196, 180);
+    selection-color: #062a52;
 }
 
 QProgressBar {
@@ -428,10 +437,10 @@ QProgressBar::chunk {
     border-radius: 8px;
     background: qlineargradient(
         x1:0, y1:0, x2:0, y2:1,
-        stop:0 rgba(190, 240, 255, 250),
-        stop:0.45 rgba(80, 190, 255, 248),
-        stop:0.55 rgba(20, 130, 240, 245),
-        stop:1 rgba(10, 90, 190, 240)
+        stop:0 rgba(214, 246, 255, 250),
+        stop:0.45 rgba(168, 228, 255, 248),
+        stop:0.55 rgba(127, 212, 255, 245),
+        stop:1 rgba(80, 190, 255, 240)
     );
 }
 
@@ -539,10 +548,10 @@ QTabWidget#enviosTabs QTabBar::tab:selected {
     border-bottom: none;
     background: qlineargradient(
         x1:0, y1:0, x2:0, y2:1,
-        stop:0 rgba(150, 220, 255, 250),
-        stop:0.48 rgba(45, 155, 250, 248),
-        stop:0.52 rgba(16, 105, 195, 245),
-        stop:1 rgba(10, 77, 140, 240)
+        stop:0 rgba(26, 111, 176, 250),
+        stop:0.48 rgba(20, 102, 170, 248),
+        stop:0.52 rgba(13, 86, 143, 245),
+        stop:1 rgba(6, 52, 92, 242)
     );
 }
 
@@ -562,7 +571,7 @@ QTableWidget#confirmTable {
     border: 1px solid rgba(255, 255, 255, 240);
     border-radius: 9px;
     padding: 6px 8px;
-    selection-background-color: rgba(30, 144, 255, 150);
+    selection-background-color: rgba(214, 239, 255, 230);
     selection-color: #062a52;
 }
 
@@ -607,8 +616,10 @@ QTableWidget#confirmTable::item {
 }
 
 QTableWidget#confirmTable::item:selected {
-    background: rgba(30, 144, 255, 120);
+    background: rgba(214, 239, 255, 240);
     color: #062a52;
+    border-top: 2px solid #0a4d8c;
+    border-bottom: 2px solid #0a4d8c;
 }
 
 QHeaderView::section {
@@ -700,7 +711,7 @@ QLabel#previewRecipients {
     padding: 0px 2px 2px 2px;
 }
 
-QTextEdit#previewBody {
+QLabel#previewBody {
     background: rgba(255, 255, 255, 238);
     color: #0b2b46;
     border: 1px solid rgba(255, 255, 255, 240);
@@ -719,7 +730,7 @@ QLabel#countChip {
     min-width: 100px;
 }
 
-QPlainTextEdit#dialogWarnings {
+QLabel#dialogWarnings {
     background: rgba(255, 248, 219, 235);
     color: #6b4b00;
     border: 1px solid rgba(220, 190, 90, 180);
@@ -753,5 +764,82 @@ QScrollBar::sub-line:horizontal {
 QScrollBar::add-page:horizontal,
 QScrollBar::sub-page:horizontal {
     background: transparent;
+}
+
+/* ------------------------------------------------------------------ */
+/* Acessibilidade: foco, alvos e rolagem do diálogo                    */
+/* ------------------------------------------------------------------ */
+QLineEdit {
+    placeholder-text-color: #4a6a86;
+}
+
+QLineEdit:focus,
+QTextEdit#bodyEditor:focus,
+QListWidget#copyList:focus,
+QTableWidget#confirmTable:focus,
+QScrollArea#dialogScroll:focus {
+    border: 2px solid #0a4d8c;
+}
+
+QPushButton#miniButton:focus,
+QPushButton#segmentButton:focus,
+QToolButton#clearButton:focus,
+QToolButton#formatButton:focus {
+    border: 2px solid #06345c;
+}
+
+QTabBar:focus {
+    border: 2px solid #0a4d8c;
+    border-radius: 8px;
+}
+
+QScrollArea#dialogScroll {
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+}
+
+QScrollArea#dialogScroll > QWidget > QWidget {
+    background: transparent;
+}
+
+QScrollArea#contentScroll {
+    background: transparent;
+    border: none;
+}
+
+QWidget#contentScrollViewport {
+    background: transparent;
+}
+
+QScrollArea#contentScroll:focus {
+    border: 2px solid #0a4d8c;
+    border-radius: 10px;
+}
+
+QScrollBar:vertical {
+    width: 24px;
+}
+
+QScrollBar::handle:vertical {
+    min-height: 32px;
+    background: rgba(48, 133, 195, 220);
+}
+
+QScrollBar::handle:vertical:hover {
+    background: rgba(30, 111, 176, 245);
+}
+
+QScrollBar:horizontal {
+    height: 24px;
+}
+
+QScrollBar::handle:horizontal {
+    min-width: 32px;
+    background: rgba(48, 133, 195, 220);
+}
+
+QScrollBar::handle:horizontal:hover {
+    background: rgba(30, 111, 176, 245);
 }
 """

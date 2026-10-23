@@ -29,6 +29,7 @@ from PyQt6.QtGui import QFont, QTextCharFormat, QTextCursor
 from PyQt6.QtWidgets import (
     QDialog,
     QFileDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -36,6 +37,7 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QMessageBox,
     QProgressBar,
+    QScrollArea,
     QSizePolicy,
     QTabWidget,
     QTextEdit,
@@ -128,6 +130,7 @@ class EnviosTab(QWidget):
         self._tabs = QTabWidget(self)
         self._tabs.setObjectName("enviosTabs")
         self._tabs.setDocumentMode(True)
+        self._tabs.setAccessibleName("Seções de envio de INS")
 
         self._tabs.addTab(self._build_send_page(), "Envios")
         self._body_tab_index = self._tabs.addTab(
@@ -140,6 +143,26 @@ class EnviosTab(QWidget):
             self._build_log_page(), "Log"
         )
         root.addWidget(self._tabs, 1)
+
+    def _wrap_page(
+        self, page: QWidget, panel: QWidget, nome: str
+    ) -> QWidget:
+        """Coloca o painel em uma área rolável para telas baixas."""
+        scroll = QScrollArea(page)
+        scroll.setObjectName("contentScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        scroll.setAccessibleName(nome)
+        scroll.viewport().setObjectName("contentScrollViewport")
+        scroll.setWidget(panel)
+        page.layout().addWidget(scroll, 1)
+        return page
 
     def _build_top(self) -> QWidget:
         panel = GlassPanel(self)
@@ -167,6 +190,9 @@ class EnviosTab(QWidget):
 
         self._debug_check = AeroCheckBox(
             "Modo debug (validar sem enviar)", panel
+        )
+        self._debug_check.setAccessibleDescription(
+            "Quando marcado, prepara e valida os grupos sem disparar e-mails."
         )
         self._debug_check.toggled.connect(self._update_mode)
         layout.addWidget(self._debug_check)
@@ -218,11 +244,13 @@ class EnviosTab(QWidget):
         self._led = StatusLed(panel)
         self._status_label = QLabel("Pronto para preparar os envios", panel)
         self._status_label.setObjectName("statusText")
+        self._status_label.setAccessibleName("Status do envio")
         self._status_label.setSizePolicy(
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
         )
         self._counter_label = QLabel("0 de 0", panel)
         self._counter_label.setObjectName("groupText")
+        self._counter_label.setAccessibleName("Contador de envios")
         status_row.addWidget(self._led)
         status_row.addWidget(self._status_label, 1)
         status_row.addWidget(self._counter_label)
@@ -232,6 +260,10 @@ class EnviosTab(QWidget):
         self._progress.setRange(0, 100)
         self._progress.setValue(0)
         self._progress.setTextVisible(True)
+        self._progress.setAccessibleName("Progresso do envio")
+        self._progress.setAccessibleDescription(
+            "Mostra quantos e-mails já foram processados."
+        )
         content.addWidget(self._progress)
 
         self._summary_label = QLabel("", panel)
@@ -248,29 +280,33 @@ class EnviosTab(QWidget):
         aviso.setWordWrap(True)
         content.addWidget(aviso)
 
-        botoes = QHBoxLayout()
+        self._wrap_page(page, panel, "Conteúdo de envios")
+
+        footer_bar = GlassPanel(page)
+        footer_bar.setAccessibleName("Ações do envio")
+        botoes = QHBoxLayout(footer_bar)
+        botoes.setContentsMargins(12, 8, 12, 8)
         botoes.setSpacing(9)
-        self._open_folder_button = GlossyButton("Abrir pasta", panel)
+
+        self._open_folder_button = GlossyButton("Abrir pasta", footer_bar)
         self._open_folder_button.setObjectName("miniButton")
         self._open_folder_button.setEnabled(False)
         self._open_folder_button.clicked.connect(self._open_folder)
         botoes.addWidget(self._open_folder_button)
         botoes.addStretch(1)
 
-        self._cancel_button = GlossyButton("Cancelar", panel)
+        self._cancel_button = GlossyButton("Cancelar", footer_bar)
         self._cancel_button.setObjectName("dangerButton")
         self._cancel_button.setEnabled(False)
         self._cancel_button.clicked.connect(self._cancel)
         botoes.addWidget(self._cancel_button)
 
-        self._prepare_button = GlossyButton("Preparar envios", panel)
+        self._prepare_button = GlossyButton("Preparar envios", footer_bar)
         self._prepare_button.setObjectName("primaryButton")
         self._prepare_button.clicked.connect(self._prepare)
         botoes.addWidget(self._prepare_button)
-        content.addLayout(botoes)
 
-        content.addStretch(1)
-        layout.addWidget(panel, 1)
+        page.layout().addWidget(footer_bar)
         return page
 
     def _build_body_page(self) -> QWidget:
@@ -306,6 +342,11 @@ class EnviosTab(QWidget):
         self._subject.setPlaceholderText(
             "{transportadora} - INS do Transportador 2026"
         )
+        self._subject.setAccessibleName("Assunto do e-mail")
+        self._subject.setAccessibleDescription(
+            "Use {transportadora} para inserir o nome do grupo automaticamente."
+        )
+        rotulo_assunto.setBuddy(self._subject)
         content.addWidget(self._subject)
 
         rotulo_corpo = QLabel("Corpo (editor com formatação)", panel)
@@ -344,6 +385,11 @@ class EnviosTab(QWidget):
             "Olá, time {transportadora}!\n\nEscreva aqui o corpo do e-mail…"
         )
         self._body.setMinimumHeight(150)
+        self._body.setAccessibleName("Corpo do e-mail")
+        self._body.setAccessibleDescription(
+            "Editor com formatação. Use {transportadora} para o nome do grupo."
+        )
+        rotulo_corpo.setBuddy(self._body)
         content.addWidget(self._body, 1)
 
         rodape = QLabel(
@@ -355,8 +401,7 @@ class EnviosTab(QWidget):
         rodape.setWordWrap(True)
         content.addWidget(rodape)
 
-        layout.addWidget(panel, 1)
-        return page
+        return self._wrap_page(page, panel, "Conteúdo do corpo do e-mail")
 
     def _format_button(
         self,
@@ -371,6 +416,7 @@ class EnviosTab(QWidget):
         botao.setObjectName("formatButton")
         botao.setText(texto)
         botao.setToolTip(dica)
+        botao.setAccessibleName(dica)
         botao.setCursor(Qt.CursorShape.PointingHandCursor)
         fonte = QFont(botao.font())
         fonte.setBold(negrito)
@@ -410,6 +456,13 @@ class EnviosTab(QWidget):
         self._copy_input.setPlaceholderText(
             "ex.: transporte.qualidade@gruposc.com.br"
         )
+        self._copy_input.setAccessibleName(
+            "Endereço de e-mail para adicionar em cópia"
+        )
+        self._copy_input.setAccessibleDescription(
+            "Separe vários endereços por ponto e vírgula, vírgula ou quebra "
+            "de linha. Pressione Enter para adicionar."
+        )
         self._copy_input.returnPressed.connect(self._add_copy_emails)
         entrada.addWidget(self._copy_input, 1)
 
@@ -423,10 +476,14 @@ class EnviosTab(QWidget):
         self._copy_list.setObjectName("copyList")
         self._copy_list.setAlternatingRowColors(False)
         self._copy_list.setMinimumHeight(180)
+        self._copy_list.setAccessibleName(
+            "Endereços que receberão cópia em todos os envios"
+        )
         content.addWidget(self._copy_list, 1)
 
         self._copy_hint = QLabel("0 endereço(s) em cópia", panel)
         self._copy_hint.setObjectName("groupText")
+        self._copy_hint.setAccessibleName("Quantidade de endereços em cópia")
         content.addWidget(self._copy_hint)
 
         botoes = QHBoxLayout()
@@ -443,8 +500,7 @@ class EnviosTab(QWidget):
         botoes.addStretch(1)
         content.addLayout(botoes)
 
-        layout.addWidget(panel, 1)
-        return page
+        return self._wrap_page(page, panel, "Conteúdo da lista de cópias")
 
     def _build_log_page(self) -> QWidget:
         page = QWidget(self)
@@ -505,8 +561,7 @@ class EnviosTab(QWidget):
         botoes.addStretch(1)
         content.addLayout(botoes)
 
-        layout.addWidget(panel, 1)
-        return page
+        return self._wrap_page(page, panel, "Conteúdo do log de envios")
 
     # ------------------------------------------------------------------
     # Tipo de relatório, modo debug e modelos
