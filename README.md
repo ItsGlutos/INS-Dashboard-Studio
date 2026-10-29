@@ -73,8 +73,11 @@ código. Os últimos caminhos usados são lembrados entre execuções.
 | Tabela do template | `INS` | `Tabela3` |
 | Nome do arquivo | `INS do Motorista - <GRUPO>.xlsx` | `INS do Transportador - <GRUPO>.xlsx` |
 
-Durante a geração o Excel é aberto **invisível**. Evite abrir/editar os
-arquivos de origem, template ou saída enquanto o processo roda.
+Durante a geração o Excel é aberto **invisível**. No **Transportador** o
+template é aberto uma única vez e reaproveitado entre os grupos (cada grupo é
+salvo como cópia, preservando pivôs e formas do `Resumo`); no **Motorista** o
+template é aberto por grupo. Evite abrir/editar os arquivos de origem,
+template ou saída enquanto o processo roda.
 
 - **Gerar dashboards** executa em uma thread separada (a janela continua
   responsiva), com barra de progresso, grupo atual e log colorido.
@@ -184,6 +187,9 @@ ins_dashboard_app/
 │   └── main_window.py       # janela principal (abas)
 └── testes/
     ├── smoke_test.py        # valida o backend sem abrir o Excel
+    ├── processor_perf_test.py  # reuso do template e leitura com calamine
+    ├── estrutura_test.py    # verificador estrutural (pivôs/formas/gráfico)
+    ├── estrutura_dashboard.py  # CLI: compara saída real com o template
     ├── e2e_excel.py         # geração real (requer Excel)
     ├── ui_e2e.py            # interface + thread + Excel, ponta a ponta
     ├── envios_test.py       # lógica de envio (sem Outlook)
@@ -195,10 +201,19 @@ ins_dashboard_app/
 ```powershell
 cd ins_dashboard_app
 python -m unittest testes.envios_test -v   # envios, sem abrir o Outlook
+python -m unittest testes.processor_perf_test testes.estrutura_test -v
 python -m testes.smoke_test                # geração, sem abrir o Excel
 python -m testes.envios_ui_smoke           # aba Envios offscreen
 python -m testes.e2e_excel                 # geração real, abre o Excel
 python -m testes.ui_e2e                    # clica em "Gerar" na interface
+```
+
+Depois de gerar dashboards reais, o verificador estrutural confere se cada
+arquivo manteve as tabelas dinâmicas, o Data Model, o gráfico e as formas do
+`Resumo` — é o teste que pega perda de elementos visuais:
+
+```powershell
+python -m testes.estrutura_dashboard --template "C:\INS\Template - Transportador.xlsx" --pasta "C:\...\saida"
 ```
 
 O `envios_ui_smoke` usa planilhas e arquivos sintéticos, não envia e-mail e
@@ -221,8 +236,10 @@ Os testes de envio usam um remetente falso: nenhum e-mail é disparado.
 - **Aviso de cabeçalho diferente**: o template pode ser de outro relatório; o
   app avisa, mas continua (útil quando o template tem colunas extras).
 - **Sem permissão ao salvar**: feche o dashboard no Excel e tente novamente.
-- **Geração lenta**: cada grupo abre e fecha o template no Excel; 20 s por
-  grupo é normal em máquinas mais lentas.
+- **Geração lenta**: no **Transportador** o template é aberto uma vez e
+  reaproveitado entre os grupos; no **Motorista** cada grupo abre e fecha o
+  template. Feche outras janelas do Excel e evite manter o template aberto
+  durante a geração.
 
 ### Envios
 
