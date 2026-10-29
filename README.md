@@ -73,6 +73,13 @@ código. Os últimos caminhos usados são lembrados entre execuções.
 | Tabela do template | `INS` | `Tabela3` |
 | Nome do arquivo | `INS do Motorista - <GRUPO>.xlsx` | `INS do Transportador - <GRUPO>.xlsx` |
 
+Antes de separar os grupos, a coluna de agrupamento passa por uma etapa de
+**Data Wrangling**: linhas sem valor são ignoradas, espaços/quebras de linha
+são colapsados e as pontas são removidas com `strip()`. No **Motorista** o
+`Apelido` também é convertido para MAIÚSCULAS — assim `" joão "`, `"João"` e
+`"JOÃO"` geram **um único** dashboard `INS do Motorista - JOÃO.xlsx`, e a
+tabela do dashboard já sai com o nome padronizado.
+
 Durante a geração o Excel é aberto **invisível**. No **Transportador** o
 template é aberto uma única vez e reaproveitado entre os grupos (cada grupo é
 salvo como cópia, preservando pivôs e formas do `Resumo`); no **Motorista** o
@@ -201,6 +208,7 @@ ins_dashboard_app/
 ```powershell
 cd ins_dashboard_app
 python -m unittest testes.envios_test -v   # envios, sem abrir o Outlook
+python -m unittest testes.normalizacao_test -v   # Data Wrangling do Apelido
 python -m unittest testes.processor_perf_test testes.estrutura_test -v
 python -m testes.smoke_test                # geração, sem abrir o Excel
 python -m testes.envios_ui_smoke           # aba Envios offscreen

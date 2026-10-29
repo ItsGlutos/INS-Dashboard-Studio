@@ -13,6 +13,15 @@ A aba reúne quatro etapas:
 
 O envio real só começa depois da confirmação visual no
 :class:`~ui.envios_dialog.EnviosConfirmDialog`.
+
+.. note::
+   **O layout será refeito.** Os métodos ``_build_*`` montam a aparência; os
+   demais métodos formam a lógica que **deve ser preservada**: o par
+   ``_running``/``_mode`` (máquina de estados "plan"/"send"), o uso de
+   ``PlanWorker``/``SendWorker`` em ``QThread``, a seleção de modelos por tipo
+   de relatório, a lista de cópia (CC), a exportação do log e a persistência
+   em ``QSettings``. Se um controle mudar de lugar no redesign, mantenha o
+   atributo ``self._*`` correspondente -- ele é referenciado pela lógica.
 """
 
 from __future__ import annotations
@@ -86,6 +95,9 @@ class EnviosTab(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._settings = QSettings("INS", "INS Dashboard Studio")
+        # Estado da aba. `_mode` guarda o tipo do worker em execução
+        # ("plan" ou "send"); `_pending_*` recebe o resultado do worker e só é
+        # aplicado na thread da GUI, em _on_thread_finished.
         self._cancel_flag = threading.Event()
         self._thread: QThread | None = None
         self._worker = None
@@ -95,6 +107,8 @@ class EnviosTab(QWidget):
         self._pending_plan: PlanoEnvios | None = None
         self._pending_result: EnvioResultado | None = None
         self._pending_error: str | None = None
+        # Modelos de assunto/corpo por tipo de relatório ("motorista" /
+        # "transportador"), carregados sob demanda e salvos no QSettings.
         self._editing_key = "motorista"
         self._templates: dict[str, dict[str, str]] = {}
         self._log_records: list[dict[str, str]] = []
@@ -122,6 +136,7 @@ class EnviosTab(QWidget):
     # Construção
     # ------------------------------------------------------------------
     def _build_ui(self) -> None:
+        """Monta a barra superior e as quatro abas internas de envio."""
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(10)
@@ -165,6 +180,11 @@ class EnviosTab(QWidget):
         return page
 
     def _build_top(self) -> QWidget:
+        """Barra superior: título, dica de modo, tipo de relatório e debug.
+
+        ``self._segmented`` e ``self._debug_check`` comandam o fluxo inteiro
+        (prefixo dos arquivos e se o disparo é real ou apenas validação).
+        """
         panel = GlassPanel(self)
         layout = QHBoxLayout(panel)
         layout.setContentsMargins(18, 12, 18, 12)
@@ -199,6 +219,11 @@ class EnviosTab(QWidget):
         return panel
 
     def _build_send_page(self) -> QWidget:
+        """Aba "Envios": fontes, progresso, contadores e botões de ação.
+
+        O botão "Preparar envios" apenas monta o plano; o disparo acontece
+        somente depois do diálogo de confirmação.
+        """
         page = QWidget(self)
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -310,6 +335,11 @@ class EnviosTab(QWidget):
         return page
 
     def _build_body_page(self) -> QWidget:
+        """Aba "Corpo do e-mail": assunto e editor rico por tipo de relatório.
+
+        O texto usa o marcador ``{transportadora}``; o HTML é enviado ao
+        Outlook e persistido em ``QSettings``.
+        """
         page = QWidget(self)
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -412,6 +442,7 @@ class EnviosTab(QWidget):
         italico: bool = False,
         sublinhado: bool = False,
     ) -> QToolButton:
+        """Cria um botão de formatação (B/I/U) já ligado ao seu slot."""
         botao = QToolButton(self)
         botao.setObjectName("formatButton")
         botao.setText(texto)
@@ -427,6 +458,7 @@ class EnviosTab(QWidget):
         return botao
 
     def _build_copy_page(self) -> QWidget:
+        """Aba "Em cópia": lista manual de CC aplicada a todos os envios."""
         page = QWidget(self)
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -503,6 +535,7 @@ class EnviosTab(QWidget):
         return self._wrap_page(page, panel, "Conteúdo da lista de cópias")
 
     def _build_log_page(self) -> QWidget:
+        """Aba "Log": resultado por transportadora, contadores e exportação."""
         page = QWidget(self)
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -567,9 +600,15 @@ class EnviosTab(QWidget):
     # Tipo de relatório, modo debug e modelos
     # ------------------------------------------------------------------
     def _current_key(self) -> str:
+        """Chave do tipo de relatório ativo (nunca vazia)."""
         return self._segmented.current or "motorista"
 
     def _on_type_changed(self, key: str) -> None:
+        """Reage à troca Motorista/Transportador na barra superior.
+
+        Salva o modelo em edição, carrega o do novo tipo e invalida o plano
+        atual (os arquivos/prefixos mudaram).
+        """
         if not key:
             return
         self._save_current_template()
@@ -585,6 +624,7 @@ class EnviosTab(QWidget):
         self._update_mode()
 
     def _update_type_hint(self) -> None:
+        """Explica no topo qual prefixo de arquivo será procurado na pasta."""
         prefixo = PREFIXOS.get(self._current_key(), "")
         self._source_hint.setText(
             "A pasta deve conter arquivos que começam com "
@@ -593,6 +633,7 @@ class EnviosTab(QWidget):
         )
 
     def _update_mode(self, *_: object) -> None:
+        """Ajusta textos conforme o modo debug estar ligado ou não."""
         debug = self._debug_check.isChecked()
         self._prepare_button.setText(
             "Validar envios (debug)" if debug else "Preparar envios"
@@ -606,6 +647,7 @@ class EnviosTab(QWidget):
         )
 
     def _load_template(self, key: str) -> None:
+        """Carrega assunto/corpo do modelo em memória (ou usa o padrão)."""
         modelo = self._templates.get(
             key,
             {
@@ -617,6 +659,7 @@ class EnviosTab(QWidget):
         self._body.setHtml(modelo.get("corpo", ""))
 
     def _save_current_template(self) -> None:
+        """Guarda o texto da aba "Corpo" no tipo de relatório em edição."""
         assunto = self._subject.text().strip()
         corpo = self._body.toHtml()
         if not assunto and not self._body.toPlainText().strip():
@@ -627,6 +670,7 @@ class EnviosTab(QWidget):
         }
 
     def _toggle_bold(self) -> None:
+        """Aplica/remove negrito na seleção do editor de corpo."""
         formato = QTextCharFormat()
         negrito = self._body.fontWeight() >= int(QFont.Weight.Bold.value)
         formato.setFontWeight(
@@ -635,26 +679,31 @@ class EnviosTab(QWidget):
         self._merge_format(formato)
 
     def _toggle_italic(self) -> None:
+        """Aplica/remove itálico na seleção do editor de corpo."""
         formato = QTextCharFormat()
         formato.setFontItalic(not self._body.fontItalic())
         self._merge_format(formato)
 
     def _toggle_underline(self) -> None:
+        """Aplica/remove sublinhado na seleção do editor de corpo."""
         formato = QTextCharFormat()
         formato.setFontUnderline(not self._body.fontUnderline())
         self._merge_format(formato)
 
     def _merge_format(self, formato: QTextCharFormat) -> None:
+        """Aplica o formato na seleção e devolve o foco ao editor."""
         cursor = self._body.textCursor()
         cursor.mergeCharFormat(formato)
         self._body.mergeCurrentCharFormat(formato)
         self._body.setFocus()
 
     def _insert_placeholder(self) -> None:
+        """Insere ``{transportadora}`` na posição do cursor."""
         self._body.textCursor().insertText("{transportadora}")
         self._body.setFocus()
 
     def _restore_defaults(self) -> None:
+        """Restaura assunto/corpo padrão do tipo ativo (com confirmação)."""
         chave = self._current_key()
         resposta = QMessageBox.question(
             self,
@@ -677,6 +726,7 @@ class EnviosTab(QWidget):
     # Cópia (CC)
     # ------------------------------------------------------------------
     def _add_copy_emails(self) -> None:
+        """Valida e adiciona à lista de CC os endereços digitados."""
         texto = self._copy_input.text().strip()
         if not texto:
             return
@@ -706,11 +756,13 @@ class EnviosTab(QWidget):
             )
 
     def _remove_copy_email(self) -> None:
+        """Remove da lista de CC as linhas selecionadas."""
         for item in self._copy_list.selectedItems():
             self._copy_list.takeItem(self._copy_list.row(item))
         self._refresh_copy_hint()
 
     def _clear_copy_emails(self) -> None:
+        """Esvazia a lista de CC após confirmação do usuário."""
         if self._copy_list.count() == 0:
             return
         resposta = QMessageBox.question(
@@ -725,6 +777,7 @@ class EnviosTab(QWidget):
             self._refresh_copy_hint()
 
     def _refresh_copy_hint(self) -> None:
+        """Atualiza o contador de endereços em cópia."""
         total = self._copy_list.count() if hasattr(self, "_copy_list") else 0
         self._copy_hint.setText(f"{total} endereço(s) em cópia")
 
@@ -739,6 +792,11 @@ class EnviosTab(QWidget):
     # Preparação do plano
     # ------------------------------------------------------------------
     def _prepare(self) -> None:
+        """Valida as fontes e inicia o planejamento em uma QThread.
+
+        Nenhum e-mail é enviado aqui: o ``PlanWorker`` apenas cruza contatos e
+        arquivos e devolve um :class:`PlanoEnvios`.
+        """
         if self._running:
             return
 
@@ -779,6 +837,7 @@ class EnviosTab(QWidget):
         self._start_thread("plan", worker)
 
     def _start_send(self, plano: PlanoEnvios, chaves: list[str]) -> None:
+        """Dispara o envio dos grupos selecionados pelo Outlook (thread)."""
         if not chaves:
             return
         self._cancel_flag = threading.Event()
@@ -799,6 +858,7 @@ class EnviosTab(QWidget):
     # Threads
     # ------------------------------------------------------------------
     def _start_thread(self, modo: str, worker) -> None:
+        """Liga um worker (plan/send) a uma QThread nova e ao estado da aba."""
         self._mode = modo
         self._pending_plan = None
         self._pending_result = None
@@ -824,18 +884,23 @@ class EnviosTab(QWidget):
         self._thread.start()
 
     def _on_worker_log(self, mensagem: str, nivel: str) -> None:
+        """Repassa ao log uma mensagem emitida pelo worker."""
         self._log_view.append_log(mensagem, nivel)
 
     def _on_worker_failed(self, mensagem: str) -> None:
+        """Guarda o erro do worker para tratar quando a thread terminar."""
         self._pending_error = mensagem
 
     def _on_plan_finished(self, plano: PlanoEnvios) -> None:
+        """Guarda o plano pronto para abrir a confirmação na thread da GUI."""
         self._pending_plan = plano
 
     def _on_send_finished(self, resultado: EnvioResultado) -> None:
+        """Guarda o resultado do envio para exibir na thread da GUI."""
         self._pending_result = resultado
 
     def _on_progress(self, atual: int, total: int, nome: str) -> None:
+        """Atualiza barra, contador e status durante o envio."""
         if total > 0:
             self._progress.setRange(0, total)
             self._progress.setValue(atual)
@@ -843,6 +908,11 @@ class EnviosTab(QWidget):
         self._status_label.setText(f"Enviando {atual} de {total} — {nome}")
 
     def _on_thread_finished(self) -> None:
+        """Aplica o resultado pendente e libera a thread/worker.
+
+        É o único ponto que toca a interface a partir de dados do worker,
+        garantindo que a atualização ocorra na thread da GUI.
+        """
         if self._worker is not None:
             self._worker.deleteLater()
             self._worker = None
@@ -873,6 +943,12 @@ class EnviosTab(QWidget):
     # Resultados
     # ------------------------------------------------------------------
     def _handle_plan(self, plano: PlanoEnvios) -> None:
+        """Mostra o plano e segue para o debug ou para a confirmação real.
+
+        Em modo debug, registra cada grupo no log e abre o diálogo apenas para
+        leitura. No modo normal, abre a confirmação; só o que estiver marcado
+        e pronto é enviado.
+        """
         self._plano = plano
         self._summary_label.setText(plano.resumo())
         self._progress.setRange(0, max(1, len(plano.grupos)))
@@ -947,6 +1023,7 @@ class EnviosTab(QWidget):
         self._start_send(plano, chaves)
 
     def _handle_send_result(self, resultado: EnvioResultado) -> None:
+        """Consolida o resultado por grupo, atualiza contadores e avisa."""
         total = resultado.total
         self._progress.setRange(0, max(1, total))
         self._progress.setValue(total)
@@ -1002,6 +1079,7 @@ class EnviosTab(QWidget):
         caixa.exec()
 
     def _handle_error(self, mensagem: str) -> None:
+        """Exibe um erro de planejamento/envio e restaura o estado."""
         self._led.set_state("error")
         self._status_label.setText("Falha nos envios")
         self._progress.setRange(0, 100)
@@ -1011,6 +1089,7 @@ class EnviosTab(QWidget):
         self._show_error("Envios INS", mensagem)
 
     def _cancel(self) -> None:
+        """Solicita o cancelamento após o e-mail atual (só no envio real)."""
         if not self._running or self._mode != "send":
             return
         self._cancel_flag.set()
@@ -1029,6 +1108,7 @@ class EnviosTab(QWidget):
     def _record(
         self, categoria: str, grupo, detalhe: str = ""
     ) -> None:
+        """Adiciona uma linha ao log estruturado usado pelo CSV."""
         self._log_records.append(
             {
                 "data_hora": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
@@ -1044,6 +1124,7 @@ class EnviosTab(QWidget):
         )
 
     def _atualizar_contadores(self) -> None:
+        """Recalcula os chips de enviados/falhos/não encontrados."""
         enviados = sum(
             1 for registro in self._log_records
             if registro["categoria"] == "enviado"
@@ -1061,12 +1142,17 @@ class EnviosTab(QWidget):
         self._missing_count.setText(f"Não encontrados: {ausentes}")
 
     def _clear_log(self) -> None:
+        """Limpa o log estruturado e o log visual, zerando os contadores."""
         self._log_records.clear()
         self._log_view.clear_log()
         self._atualizar_contadores()
         self._log_view.append_log("Log limpo.", "info")
 
     def _export_log(self) -> None:
+        """Exporta o log estruturado em CSV (separador ";", UTF-8 com BOM).
+
+        O BOM (``utf-8-sig``) faz o Excel abrir os acentos corretamente.
+        """
         if not self._log_records:
             self._show_info(
                 "Log vazio",
@@ -1129,6 +1215,7 @@ class EnviosTab(QWidget):
             )
 
     def _restore_settings(self) -> None:
+        """Restaura tipo, caminhos, modo debug, CC e modelos do QSettings."""
         tipo = str(self._settings.value(_SET_TYPE, "motorista") or "")
         if tipo not in PREFIXOS:
             tipo = "motorista"
@@ -1181,6 +1268,11 @@ class EnviosTab(QWidget):
     # Utilidades da interface
     # ------------------------------------------------------------------
     def _set_running(self, running: bool) -> None:
+        """Bloqueia/libera os controles da aba durante planejamento ou envio.
+
+        Ponto único de bloqueio desta aba; novos controles que devam ficar
+        indisponíveis durante a execução precisam ser adicionados aqui.
+        """
         self._running = running
         self._prepare_button.setEnabled(not running)
         self._cancel_button.setEnabled(
@@ -1197,15 +1289,18 @@ class EnviosTab(QWidget):
         self._tabs.setTabEnabled(self._copy_tab_index, not running)
 
     def _folder_exists(self) -> bool:
+        """Diz se o caminho escolhido ainda é uma pasta existente."""
         caminho = self._folder_selector.path
         return bool(caminho) and Path(caminho).is_dir()
 
     def _refresh_folder_button(self, *_: object) -> None:
+        """Habilita "Abrir pasta" somente com pasta válida e fora de execução."""
         self._open_folder_button.setEnabled(
             not self._running and self._folder_exists()
         )
 
     def _open_folder(self) -> None:
+        """Abre no Explorador a pasta de arquivos INS (somente Windows)."""
         caminho = Path(self._folder_selector.path)
         if not caminho.is_dir():
             self._show_error(
@@ -1228,6 +1323,7 @@ class EnviosTab(QWidget):
             )
 
     def _show_error(self, titulo: str, mensagem: str) -> None:
+        """Exibe um aviso de erro padronizado."""
         caixa = QMessageBox(self)
         caixa.setIcon(QMessageBox.Icon.Warning)
         caixa.setWindowTitle(titulo)
@@ -1236,6 +1332,7 @@ class EnviosTab(QWidget):
         caixa.exec()
 
     def _show_info(self, titulo: str, mensagem: str) -> None:
+        """Exibe um aviso informativo padronizado."""
         caixa = QMessageBox(self)
         caixa.setIcon(QMessageBox.Icon.Information)
         caixa.setWindowTitle(titulo)
@@ -1245,6 +1342,7 @@ class EnviosTab(QWidget):
 
     @staticmethod
     def _format_duration(seconds: float) -> str:
+        """Formata a duração do envio de forma legível (s / min / h)."""
         try:
             total = float(seconds)
         except (TypeError, ValueError):

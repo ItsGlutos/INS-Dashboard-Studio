@@ -3,6 +3,12 @@
 Executa a interface gráfica PyQt6 com o visual Frutiger Aero:
 
     python ins_dashboard_app/main.py
+
+.. note::
+   Este arquivo é **funcional e estável**: define o ``QApplication``, o estilo
+   ``Fusion``, a fonte, o ícone e o QSS global. No redesign, a única troca
+   esperada aqui é a chamada de ``build_stylesheet()`` / ``create_app_icon()``
+   -- a ordem de inicialização e o ajuste de ``sys.path`` devem permanecer.
 """
 
 from __future__ import annotations

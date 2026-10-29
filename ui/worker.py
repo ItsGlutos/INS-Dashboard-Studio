@@ -4,6 +4,11 @@ O :class:`~backend.processor.DashboardProcessor` usa automação do Excel
 (xlwings/COM) e portanto é **bloqueante**.  O :class:`JobWorker` executa o
 ``run()`` dentro de uma ``QThread`` e repassa o andamento para a interface
 apenas por meio de sinais Qt.
+
+.. note::
+   Este módulo é **somente funcional** e não faz parte do redesign visual.
+   Mantenha a assinatura dos sinais (``progress``, ``log``, ``finished``,
+   ``failed``, ``cancelled``): ``ui/main_window.py`` depende delas.
 """
 
 from __future__ import annotations

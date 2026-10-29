@@ -3,6 +3,14 @@
 Reúne a configuração do trabalho (tipo de relatório, arquivo de origem,
 template e pasta de saída), a área de execução (progresso, log e resumo) e
 o controle do backend, que roda sempre em uma ``QThread`` separada.
+
+.. note::
+   **O layout será refeito.** Toda a hierarquia visual é montada em
+   ``_build_*``; trocar a aparência significa reescrever esses métodos
+   mantendo os mesmos atributos (``self._segmented``, ``self._source_selector``
+   etc.), pois a lógica de execução e persistência os referencia diretamente.
+   Não mova para a camada visual os sinais/slots, o controle de
+   ``_running``/``_cancel_flag`` nem a persistência via ``QSettings``.
 """
 
 from __future__ import annotations
@@ -69,6 +77,9 @@ class MainWindow(QMainWindow):
             self.resize(1180, 860)
 
         self._settings = QSettings("INS", "INS Dashboard Studio")
+        # Estado de execução: _running bloqueia a UI, _cancel_flag é lida pela
+        # thread de trabalho e _close_after_cancel adia o fechamento da janela
+        # até a thread terminar com segurança.
         self._cancel_flag = threading.Event()
         self._thread: QThread | None = None
         self._worker = None
@@ -86,7 +97,12 @@ class MainWindow(QMainWindow):
     # Construção da interface
     # ------------------------------------------------------------------
     def _build_ui(self) -> None:
-        """Monta a hierarquia de widgets da janela."""
+        """Monta a hierarquia de widgets da janela.
+
+        Estrutura: cabeçalho fixo -> QTabWidget com as abas "Geração de
+        dashboards" e "Envios de INS" -> rodapé. A aba de geração usa um
+        QScrollArea para continuar utilizável em telas baixas.
+        """
         background = SkyBackground(self)
         self.setCentralWidget(background)
 
@@ -170,7 +186,12 @@ class MainWindow(QMainWindow):
         return panel
 
     def _build_config_panel(self) -> QWidget:
-        """Cria o painel de configuração (tipo de relatório e caminhos)."""
+        """Cria o painel de configuração (tipo de relatório e caminhos).
+
+        Os widgets guardados em ``self._*`` não são decoração: cada um é lido
+        por ``_build_config``/``_save_settings``/``_set_running``. Se o layout
+        mudar, mantenha esses atributos.
+        """
         panel = GlassPanel()
         panel.setFixedWidth(430)
 
@@ -255,7 +276,11 @@ class MainWindow(QMainWindow):
         return panel
 
     def _build_run_panel(self) -> QWidget:
-        """Cria o painel de execução (progresso, log e botões)."""
+        """Cria o painel de execução (progresso, log e botões).
+
+        Além da aparência, cada controle é o destino dos callbacks de
+        ``JobWorker`` (progresso, log, conclusão, falha e cancelamento).
+        """
         panel = GlassPanel()
 
         layout = QVBoxLayout(panel)
@@ -340,7 +365,7 @@ class MainWindow(QMainWindow):
         return panel
 
     def _build_footer(self) -> QWidget:
-        """Cria a barra inferior com atalhos e dicas de uso."""
+        """Cria a barra inferior com atalhos e dicas de uso (só informativa)."""
         footer = QFrame(self)
         footer.setObjectName("glassPanel")
         footer.setFixedHeight(34)
@@ -484,6 +509,8 @@ class MainWindow(QMainWindow):
 
         from .worker import JobWorker
 
+        # O processamento (Excel/COM) é bloqueante: roda em QThread e conversa
+        # com a interface apenas por sinais Qt (thread-safety).
         self._thread = QThread(self)
         self._worker = JobWorker(self._cancel_flag)
         self._worker.moveToThread(self._thread)
@@ -495,6 +522,8 @@ class MainWindow(QMainWindow):
         self._worker.failed.connect(self._on_failed)
         self._worker.cancelled.connect(self._on_cancelled)
 
+        # Qualquer desfecho encerra a thread; só depois dela terminar a UI é
+        # reabilitada (ver _on_thread_finished).
         self._worker.finished.connect(self._thread.quit)
         self._worker.failed.connect(self._thread.quit)
         self._worker.cancelled.connect(self._thread.quit)
@@ -606,7 +635,12 @@ class MainWindow(QMainWindow):
     # Utilidades da interface
     # ------------------------------------------------------------------
     def _set_running(self, running: bool) -> None:
-        """Habilita/desabilita os controles conforme o estado da execução."""
+        """Habilita/desabilita os controles conforme o estado da execução.
+
+        Ponto único de bloqueio da interface: se novos controles forem criados
+        no redesign e precisarem ser bloqueados durante a geração, adicione-os
+        aqui (e não espalhe chamadas de setEnabled pelas telas).
+        """
         self._running = running
         self._generate_button.setEnabled(not running)
         self._cancel_button.setEnabled(running)

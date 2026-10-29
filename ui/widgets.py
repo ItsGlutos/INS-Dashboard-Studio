@@ -10,6 +10,15 @@ sem imagens externas:
 * :class:`FileSelector` -- seletor de arquivo/pasta com ``QFileDialog``;
 * :class:`LogView` -- área de log colorida por nível;
 * :class:`StatusLed` -- indicador de status tipo LED.
+
+.. note::
+   **O visual será refeito.** Os componentes abaixo desenham o tema Frutiger
+   Aero com ``QPainter``/QSS. O *desenho* (gradientes, sombras, animações,
+   elipses do céu) é estética e pode ser substituído no redesign. O que NÃO
+   deve mudar é a **API pública** consumida pelas telas: ``path``,
+   ``set_path``, ``current``, ``set_current``, ``changed``,
+   ``selectionChanged``, ``append_log``, ``set_state`` etc. -- junto com os
+   ``objectName`` usados pelo QSS de :mod:`ui.theme`.
 """
 
 from __future__ import annotations
@@ -73,6 +82,8 @@ __all__ = [
 # ---------------------------------------------------------------------------
 # Fundo animado
 # ---------------------------------------------------------------------------
+# 100% estético: céu, sol, nuvens e bolhas não têm função de negócio. No
+# redesign, todo este bloco pode ser trocado por outra arte/imagem.
 class SkyBackground(QWidget):
     """Fundo com céu em degradê, sol, nuvens e bolhas translúcidas."""
 
@@ -247,6 +258,8 @@ class SkyBackground(QWidget):
 # ---------------------------------------------------------------------------
 # Painel de vidro
 # ---------------------------------------------------------------------------
+# Aparência (fundo translúcido + sombra). As telas apenas usam GlassPanel como
+# container; um novo tema pode substituir por QFrame/QWidget comum.
 class GlassPanel(QFrame):
     """Painel translúcido com borda clara, cantos arredondados e sombra."""
 
@@ -264,6 +277,8 @@ class GlassPanel(QFrame):
 # ---------------------------------------------------------------------------
 # Botão glossy
 # ---------------------------------------------------------------------------
+# Aparência + um detalhe funcional: o anel de foco desenhado em paintEvent
+# garante contraste de teclado. Preserve o foco visível mesmo trocando o tema.
 class GlossyButton(QPushButton):
     """Botão com brilho glossy desenhado pelo QSS e foco visível."""
 
@@ -302,6 +317,8 @@ class GlossyButton(QPushButton):
 # ---------------------------------------------------------------------------
 # Checkbox Aero
 # ---------------------------------------------------------------------------
+# Aparência (indicador desenhado à mão). A semântica é a de um QCheckBox
+# normal: `isChecked`/`toggled` são usados pela lógica das telas.
 class AeroCheckBox(QCheckBox):
     """Checkbox com indicador de vidro e checkmark desenhados em código.
 
@@ -394,6 +411,9 @@ class AeroCheckBox(QCheckBox):
 # ---------------------------------------------------------------------------
 # Seletor segmentado
 # ---------------------------------------------------------------------------
+# Componente funcional: mantém a chave selecionada e emite `changed(key)`.
+# A aparência (pílula segmentada) pode mudar; a API `current`/`set_current`
+# é usada pelas duas abas e deve ser preservada.
 class SegmentedSelector(QWidget):
     """Controle segmentado com dois estados mutuamente exclusivos."""
 
@@ -468,6 +488,9 @@ class SegmentedSelector(QWidget):
 # ---------------------------------------------------------------------------
 # Seletor de arquivo / pasta
 # ---------------------------------------------------------------------------
+# Componente funcional: encapsula QFileDialog, o caminho escolhido e o sinal
+# `selectionChanged`. A camada visual (campo de vidro, botão de limpar) pode
+# mudar, mas `path`/`set_path`/`clear` são usados na persistência QSettings.
 class FileSelector(QWidget):
     """Campo que exibe um caminho e permite escolher/limpar via QFileDialog."""
 
@@ -630,6 +653,9 @@ class FileSelector(QWidget):
 # ---------------------------------------------------------------------------
 # Área de log
 # ---------------------------------------------------------------------------
+# Componente funcional com aparência simples: recebe mensagens do backend e
+# aplica cor por nível. O escape de HTML em `append_log` é importante para
+# não interpretar textos do usuário como marcação.
 class LogView(QWidget):
     """Área de log com cores por nível (info/success/warning/error)."""
 
@@ -688,6 +714,8 @@ class LogView(QWidget):
 # ---------------------------------------------------------------------------
 # LED de status
 # ---------------------------------------------------------------------------
+# Aparência com semântica de estado (`idle`, `running`, `ok`, `error`,
+# `cancelled`). As telas dependem de `set_state`/`state`; o pulsar é só visual.
 class StatusLed(QWidget):
     """Indicador luminoso de status (parado / executando / ok / erro)."""
 
@@ -770,6 +798,8 @@ class StatusLed(QWidget):
 # ---------------------------------------------------------------------------
 # Ícone do aplicativo
 # ---------------------------------------------------------------------------
+# Puramente estético e desenhado em código (sem .png). Usado na janela e na
+# barra de tarefas; pode ser substituído por outro ícone no redesign.
 def create_app_icon(size: int = 64) -> QIcon:
     """Desenha o ícone do aplicativo (bolha/onda) com QPainter."""
     pixmap = QPixmap(size, size)

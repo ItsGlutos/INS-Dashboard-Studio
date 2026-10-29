@@ -3,6 +3,13 @@
 Cada linha representa uma transportadora e mostra arquivo, destinatários,
 cópias e situação. Somente linhas marcadas e prontas são enviadas. Em modo
 debug o diálogo serve apenas para validação: nenhum e-mail é disparado.
+
+.. note::
+   **A tabela/prévia serão refeitas no redesign.** A aparência está em
+   ``_build_ui`` e ``_fill_row``; o que precisa ser preservado é o contrato:
+   :meth:`selected_keys` devolve apenas grupos marcados **e** ``pronto``, e
+   ``accept()`` só é chamado quando há seleção válida. Em modo debug o botão
+   de confirmação fica oculto e nada é enviado.
 """
 
 from __future__ import annotations
@@ -410,6 +417,7 @@ class EnviosConfirmDialog(QDialog):
         return chaves
 
     def _toggle_all(self, marcado: bool) -> None:
+        """Marca/desmarca todos os grupos prontos (ignora os inválidos)."""
         if self._building:
             return
         for indice, grupo in enumerate(self._groups):
@@ -422,6 +430,7 @@ class EnviosConfirmDialog(QDialog):
         self._update_selection()
 
     def _update_selection(self, *_: object) -> None:
+        """Atualiza o rodapé, o botão "Selecionar todos" e o confirmar."""
         if self._building:
             return
         selecionados = len(self.selected_keys())
@@ -443,6 +452,7 @@ class EnviosConfirmDialog(QDialog):
         self.select_all.blockSignals(False)
 
     def _on_confirm(self) -> None:
+        """Fecha o diálogo com aceite somente se houver grupo selecionado."""
         if not self.selected_keys():
             return
         self.accept()

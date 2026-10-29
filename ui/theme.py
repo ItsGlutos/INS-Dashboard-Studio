@@ -4,6 +4,18 @@ O visual segue o estilo "Frutiger Aero" (Windows Vista/7): céu em degradê,
 painéis de vidro translúcido, botões glossy com brilho superior e paleta
 azul/ciano/verde-água.  Nada aqui depende de imagens externas: apenas cores
 e QSS.
+
+.. note::
+   **Este é o único arquivo de aparência do aplicativo e ele será reescrito
+   no redesign.** Nenhuma regra daqui contém lógica de negócio: o QSS apenas
+   estiliza ``objectName``/pseudo-estados definidos em ``ui/widgets.py`` e nas
+   telas. Ao trocar o tema, mantenha os mesmos ``objectName`` (ou atualize os
+   dois lados juntos) e preserve :func:`build_stylesheet`, que é a API usada
+   por ``main.py``.
+
+   As cores de ``LOG_COLORS`` e ``LED_COLORS`` são lidas em tempo de execução
+   por ``ui.widgets``; se forem alteradas, revise o contraste (o projeto
+   mantém pelo menos 3:1 sobre os painéis de vidro).
 """
 
 from __future__ import annotations
@@ -29,7 +41,9 @@ TEXT_DARK = "#0b2b46"
 TEXT_MUTED = "#3f5f7d"
 TEXT_LIGHT = "#eaf6ff"
 
-# Cores do log (texto claro sobre painel escuro)
+# Cores do log (texto claro sobre painel escuro).
+# Sao lidas por ui.widgets.LogView; se o redesign trocar o painel escuro,
+# revise o contraste destas cores.
 LOG_COLORS: dict[str, str] = {
     "info": "#bfe8ff",
     "success": "#8ff0c0",
@@ -57,6 +71,12 @@ def build_stylesheet() -> str:
 
 
 _QSS = """
+/* ==================================================================== */
+/* CAMADA VISUAL -- reescrever no redesign                              */
+/* As regras abaixo só estilizam objectName/pseudo-estados. Nenhuma     */
+/* lógica do aplicativo depende do conteúdo deste bloco.               */
+/* ==================================================================== */
+
 /* ------------------------------------------------------------------ */
 /* Base                                                                */
 /* ------------------------------------------------------------------ */

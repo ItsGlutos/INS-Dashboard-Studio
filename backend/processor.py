@@ -4,8 +4,11 @@ O fluxo reproduz fielmente os notebooks originais:
 
 1. lê a aba ``INS`` da planilha de origem;
 2. filtra/remove colunas conforme o tipo de relatório;
-3. agrupa por motorista (``Apelido``) ou transportadora (``TRANSPORTADOR``);
-4. para cada grupo, preenche a tabela do template no Excel, recalcula,
+3. aplica *Data Wrangling* na coluna de agrupamento (espaços, quebras de
+   linha e caixa) **antes** de separar os grupos -- ver
+   :meth:`DashboardProcessor._wrangle_group_column`;
+4. agrupa por motorista (``Apelido``) ou transportadora (``TRANSPORTADOR``);
+5. para cada grupo, preenche a tabela do template no Excel, recalcula,
    atualiza as consultas e salva um arquivo novo. Nos relatórios com
    ``ReportType.reuse_template`` (Transportador) o template é aberto uma única
    vez e cada grupo é salvo com ``SaveCopyAs``, mantendo o modelo de dados
@@ -313,25 +316,76 @@ class DashboardProcessor:
                 )
             prepared = dataframe.drop(columns=present_drop).copy()
 
-        missing_groups = prepared[report.group_column].isna().sum()
-        if missing_groups:
+        return self._wrangle_group_column(prepared, report)
+
+    def _wrangle_group_column(
+        self, prepared: pd.DataFrame, report: ReportType
+    ) -> pd.DataFrame:
+        """Limpa a coluna de agrupamento antes de separar os grupos.
+
+        Esta é a etapa de *Data Wrangling* do fluxo: a planilha de origem é
+        digitada manualmente e traz variações que quebrariam o agrupamento
+        (espaços sobrando, espaços duplos, quebras de linha, NBSP e caixa
+        inconsistente). Limpamos **a coluna inteira**, não só o nome usado no
+        arquivo, para que:
+
+        * ``" joão "``, ``"JOÃO"`` e ``"João"`` virem um único grupo;
+        * a tabela gravada no dashboard mostre o mesmo valor usado no nome do
+          arquivo de saída.
+
+        Regras aplicadas, nesta ordem:
+
+        1. linhas sem valor são descartadas (com aviso no log);
+        2. qualquer sequência de espaços/quebras vira um espaço simples;
+        3. as pontas são removidas com ``strip()``;
+        4. a caixa é padronizada quando ``uppercase_group_values`` está ligado;
+        5. valores que ficaram vazios recebem ``SEM IDENTIFICACAO``.
+
+        A normalização acontece **antes** do ``groupby`` de
+        :meth:`_split_groups`; normalizar depois só renomearia o grupo e ainda
+        geraria dashboards duplicados.
+        """
+        column = report.group_column
+        serie = prepared[column]
+
+        missing = int(serie.isna().sum())
+        if missing:
             self._log(
-                f"{int(missing_groups)} linha(s) sem valor em "
-                f"'{report.group_column}' serão ignoradas.",
+                f"{int(missing)} linha(s) sem valor em "
+                f"'{column}' serão ignoradas.",
                 _ICON_WARNING,
             )
-            prepared = prepared[prepared[report.group_column].notna()]
+            prepared = prepared[serie.notna()].copy()
+            serie = prepared[column]
 
-        if report.uppercase_group_values:
-            prepared[report.group_column] = (
-                prepared[report.group_column].astype(str).str.upper()
+        # "string" preserva nulos como <NA> (em vez do texto "nan") e permite
+        # usar os métodos .str sem quebrar em colunas de tipos mistos.
+        normalizada = serie.astype("string")
+        if report.strip_group_values:
+            normalizada = (
+                normalizada.str.replace(r"\s+", " ", regex=True).str.strip()
             )
+        if report.uppercase_group_values:
+            normalizada = normalizada.str.upper()
 
+        # Depois da limpeza, um valor pode ter ficado vazio (ex.: célula com
+        # apenas espaços). Mantemos a linha, mas com um rótulo legível.
+        normalizada = normalizada.mask(normalizada.eq(""), "SEM IDENTIFICACAO")
+
+        # object garante que o xlwings receba texto puro ao preencher a tabela.
+        prepared[column] = normalizada.astype(object)
         return prepared
 
     def _split_groups(
         self, dataframe: pd.DataFrame, report: ReportType
     ) -> list[tuple[str, pd.DataFrame]]:
+        """Separa os dados em um DataFrame por grupo (motorista/transportador).
+
+        A coluna de agrupamento já chega limpa de
+        :meth:`_prepare_dataframe` -> :meth:`_wrangle_group_column`; aqui só
+        resta agrupar. O nome do grupo é revalidado por segurança e sempre
+        sobe em MAIÚSCULAS porque ele também nomeia o arquivo de saída.
+        """
         prepared = self._prepare_dataframe(dataframe, report)
         if prepared.empty:
             return []

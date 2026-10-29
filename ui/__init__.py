@@ -6,6 +6,19 @@ Módulos:
 * :mod:`ui.widgets` -- componentes reutilizáveis (céu, vidro, botões, log…);
 * :mod:`ui.worker` -- execução do backend em ``QThread``;
 * :mod:`ui.main_window` -- janela principal.
+
+.. note::
+   **O visual (Frutiger Aero) será refeito em breve.** Ao ler este pacote,
+   separe mentalmente duas camadas:
+
+   * **estética** -- QSS, cores, ``QPainter``, sombras, animações e tamanhos.
+     Pode ser substituída no redesign sem afetar o restante do app.
+   * **funcional** -- ligação de sinais, threads, validações, persistência
+     (``QSettings``), acessibilidade e regras de negócio. **Deve ser
+     preservada** no redesign.
+
+   Os componentes de :mod:`ui.widgets` expõem uma API pública estável; o
+   desenho interno pode mudar, mas os nomes/métodos usados pelas telas não.
 """
 
 from __future__ import annotations

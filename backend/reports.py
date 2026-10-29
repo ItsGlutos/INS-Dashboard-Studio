@@ -39,6 +39,10 @@ class ReportType:
     output_prefix: str
     keep_columns: tuple[str, ...] = ()
     drop_columns: tuple[str, ...] = ()
+    # Data Wrangling da coluna de agrupamento (ver processor._wrangle_group_column):
+    # espaços são sempre normalizados; a caixa só é padronizada quando faz
+    # sentido para o relatório.
+    strip_group_values: bool = True
     uppercase_group_values: bool = False
     reuse_template: bool = False
 
@@ -63,6 +67,10 @@ MOTORISTA = ReportType(
     template_table="INS",
     group_column="Apelido",
     output_prefix="INS do Motorista",
+    # O "Apelido" vem digitado de formas diferentes na origem ("joão",
+    # "João ", "JOÃO"). Padronizamos tudo em MAIÚSCULAS para que a mesma
+    # pessoa caia em um único grupo e o dashboard mostre um nome só.
+    uppercase_group_values=True,
     keep_columns=(
         "Mês",
         "Rota/Roteiro",

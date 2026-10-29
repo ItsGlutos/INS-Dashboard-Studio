@@ -3,6 +3,11 @@
 Ler a planilha de contatos, varrer a pasta e enviar pelo Outlook são
 operações bloqueantes. Elas rodam em ``QThread`` e conversam com a interface
 somente por sinais Qt.
+
+.. note::
+   Este módulo é **somente funcional** e não faz parte do redesign visual.
+   ``PlanWorker`` e ``SendWorker`` são referenciados por
+   ``ui/envios_tab.py``; preserve os construtores e os sinais.
 """
 
 from __future__ import annotations
