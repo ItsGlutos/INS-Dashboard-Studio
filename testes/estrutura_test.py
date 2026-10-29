@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 from openpyxl import Workbook
@@ -55,6 +57,43 @@ class EstruturaTest(unittest.TestCase):
         self.assertTrue(
             any(p.startswith("graficos:") for p in problemas), problemas
         )
+
+    def test_calculo_manual_e_reportado(self) -> None:
+        """calcMode="manual" deixa os cards TxLink em branco no Excel."""
+        manual = self.base / "manual.xlsx"
+        _marcar_manual(self.referencia, manual)
+
+        self.assertEqual(inventariar(manual).calculo, "manual")
+        problemas = comparar(
+            inventariar(self.referencia), inventariar(manual)
+        )
+        self.assertTrue(
+            any(p.startswith("modo de cálculo:") for p in problemas), problemas
+        )
+
+
+def _marcar_manual(origem: Path, destino: Path) -> None:
+    with zipfile.ZipFile(origem) as entrada, zipfile.ZipFile(
+        destino, "w", zipfile.ZIP_DEFLATED
+    ) as saida:
+        for item in entrada.infolist():
+            dados = entrada.read(item.filename)
+            if item.filename == "xl/workbook.xml":
+                xml = dados.decode("utf-8")
+                if "<calcPr" in xml:
+                    xml = re.sub(
+                        r"<calcPr([^>]*)/>",
+                        r'<calcPr\1 calcMode="manual"/>',
+                        xml,
+                        count=1,
+                    )
+                else:
+                    xml = xml.replace(
+                        "</workbook>",
+                        '<calcPr calcId="1" calcMode="manual"/></workbook>',
+                    )
+                dados = xml.encode("utf-8")
+            saida.writestr(item, dados)
 
 
 if __name__ == "__main__":

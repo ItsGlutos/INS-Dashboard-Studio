@@ -22,7 +22,7 @@ from unittest.mock import patch
 import pandas as pd
 
 from backend import DashboardProcessor, JobConfig, get_report_type
-from backend.processor import XL_CALCULATION_MANUAL
+from backend.processor import XL_CALCULATION_AUTOMATIC, XL_CALCULATION_MANUAL
 from backend.reports import MOTORISTA
 from testes.smoke_test import _build_fixtures, _make_template
 
@@ -129,21 +129,27 @@ class _FakeSheets:
 
 
 class _FakeBookApi:
-    def __init__(self) -> None:
+    def __init__(self, app: "_FakeApp") -> None:
+        self._app = app
         self.saves: list[str] = []
         self.refreshes = 0
+        self.calculation_at_save: list[int | None] = []
 
     def RefreshAll(self) -> None:  # noqa: N802 - nome da API do Excel
         self.refreshes += 1
 
     def SaveCopyAs(self, path: str) -> None:  # noqa: N802 - nome da API do Excel
+        # O modo de cálculo vigente é gravado no arquivo (<calcPr calcMode>).
+        # Salvar em manual deixa os campos vinculados (cards do Resumo) em
+        # branco até o usuário forçar um recálculo.
+        self.calculation_at_save.append(self._app.api.Calculation)
         self.saves.append(path)
 
 
 class _FakeBook:
-    def __init__(self) -> None:
+    def __init__(self, app: "_FakeApp") -> None:
         self.sheets = _FakeSheets()
-        self.api = _FakeBookApi()
+        self.api = _FakeBookApi(app)
         self.close_calls = 0
         self.save_calls: list[str] = []
 
@@ -155,13 +161,14 @@ class _FakeBook:
 
 
 class _FakeBooks:
-    def __init__(self) -> None:
+    def __init__(self, app: "_FakeApp") -> None:
+        self._app = app
         self.opened: list[str] = []
         self.books: list[_FakeBook] = []
 
     def open(self, path: str) -> _FakeBook:  # noqa: A003 - nome da API do xlwings
         self.opened.append(path)
-        book = _FakeBook()
+        book = _FakeBook(self._app)
         self.books.append(book)
         return book
 
@@ -173,8 +180,8 @@ class _FakeAppApi:
 
 class _FakeApp:
     def __init__(self, **_kwargs) -> None:
-        self.books = _FakeBooks()
         self.api = _FakeAppApi()
+        self.books = _FakeBooks(self)
         self.quit_calls = 0
         self.display_alerts = True
         self.screen_updating = True
@@ -246,7 +253,30 @@ class TemplateReuseTest(unittest.TestCase):
             [item for item in result.outputs if not item.output_path.name],
             result.outputs,
         )
-        self.assertEqual(app.api.Calculation, XL_CALCULATION_MANUAL)
+        self.assertEqual(app.api.Calculation, XL_CALCULATION_AUTOMATIC)
+
+    def test_salva_cada_grupo_com_calculo_automatico(self) -> None:
+        """Salvar em manual grava calcMode="manual" e apaga os cards do Resumo.
+
+        Os números dos cards são campos ``TxLink`` (formas ligadas às células
+        do Gerencial). Com o arquivo em cálculo manual o Excel não os avalia ao
+        abrir e eles ficam em branco até alguém forçar um recálculo.
+        """
+        fake = _FakeXlwings()
+        processor = DashboardProcessor()
+        processor._xlwings = fake
+
+        with patch.object(
+            DashboardProcessor, "_init_com", return_value=None
+        ):
+            processor.run(self.config)
+
+        api = fake.apps[0].books.books[0].api
+        self.assertEqual(
+            api.calculation_at_save,
+            [XL_CALCULATION_AUTOMATIC, XL_CALCULATION_AUTOMATIC],
+            "todo SaveCopyAs deve acontecer com o cálculo automático",
+        )
 
     def test_usa_copia_temporaria_do_template(self) -> None:
         fake = _FakeXlwings()

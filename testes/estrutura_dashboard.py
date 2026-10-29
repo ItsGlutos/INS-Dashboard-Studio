@@ -41,6 +41,7 @@ class Inventario:
     formas: Counter[str]
     ancoras: dict[str, int]
     tamanho_mb: float
+    calculo: str = "auto"
 
     @property
     def total_formas(self) -> int:
@@ -51,6 +52,19 @@ class Inventario:
 class Diferenca:
     arquivo: str
     problemas: list[str] = field(default_factory=list)
+
+
+def _modo_calculo(pacote: zipfile.ZipFile) -> str:
+    """Modo gravado em <calcPr>. ``manual`` deixa os campos TxLink em branco."""
+    try:
+        xml = pacote.read("xl/workbook.xml").decode("utf-8", "ignore")
+    except KeyError:
+        return "auto"
+    trecho = re.search(r"<calcPr[^>]*/>", xml)
+    if not trecho:
+        return "auto"
+    modo = re.search(r'calcMode="([^"]+)"', trecho.group(0))
+    return modo.group(1) if modo else "auto"
 
 
 def inventariar(caminho: Path) -> Inventario:
@@ -69,11 +83,13 @@ def inventariar(caminho: Path) -> Inventario:
             xml = pacote.read(nome).decode("utf-8", "ignore")
             formas.update(_FORMAS.findall(xml))
             ancoras.update(_ANCORAS.findall(xml))
+        calculo = _modo_calculo(pacote)
     return Inventario(
         partes=contagem,
         formas=formas,
         ancoras=dict(ancoras),
         tamanho_mb=round(caminho.stat().st_size / 1024 / 1024, 3),
+        calculo=calculo,
     )
 
 
@@ -101,6 +117,12 @@ def comparar(referencia: Inventario, candidato: Inventario) -> list[str]:
         problemas.append(
             f"âncoras do desenho: template={referencia.ancoras}, "
             f"gerado={candidato.ancoras}"
+        )
+
+    if candidato.calculo == "manual":
+        problemas.append(
+            "modo de cálculo: gerado=manual (os cards TxLink ficam em branco "
+            "até o usuário forçar um recálculo)"
         )
     return problemas
 
@@ -130,7 +152,8 @@ def main(argv: list[str] | None = None) -> int:
         f"modelo={referencia.partes['modelo']} "
         f"formas={referencia.total_formas} "
         f"gráficos={referencia.partes['graficos']} "
-        f"imagens={referencia.partes['imagens']}"
+        f"imagens={referencia.partes['imagens']} "
+        f"cálculo={referencia.calculo}"
     )
 
     saidas = sorted(args.pasta.glob("INS do Transportador - *.xlsx"))

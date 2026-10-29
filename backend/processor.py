@@ -521,6 +521,12 @@ class DashboardProcessor:
         """Preenche o workbook já aberto e salva uma cópia para o grupo."""
         row_count = len(group_data)
 
+        # Manual enquanto escreve (evita recalcular a cada célula). O modo é
+        # devolvido para automático antes de salvar: o Excel grava o estado em
+        # <calcPr calcMode>, e um arquivo salvo em manual não avalia os campos
+        # TxLink dos cards do Resumo ao abrir (números em branco).
+        app.api.Calculation = XL_CALCULATION_MANUAL
+
         if table.data_body_range is not None:
             table.data_body_range.clear_contents()
 
@@ -538,7 +544,9 @@ class DashboardProcessor:
                 f"template ({exc}). O dashboard foi salvo mesmo assim.",
                 _ICON_WARNING,
             )
-        app.api.Calculation = XL_CALCULATION_MANUAL
+        # Não voltar para manual aqui: o próximo grupo reativa o modo manual
+        # no início de _write_dashboard. Salvar em manual gravaria
+        # calcMode="manual" no dashboard.
 
         self._check_cancel()
         self._save_workbook(workbook, output_path)
