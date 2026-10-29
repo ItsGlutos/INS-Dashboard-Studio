@@ -3,3 +3,4 @@ openpyxl>=3.1
 xlwings>=0.31
 pywin32>=306 ; sys_platform == "win32"
 PyQt6>=6.6
+python-calamine>=0.2 ; sys_platform == "win32"

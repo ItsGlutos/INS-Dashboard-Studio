@@ -5,8 +5,11 @@ O fluxo reproduz fielmente os notebooks originais:
 1. lê a aba ``INS`` da planilha de origem;
 2. filtra/remove colunas conforme o tipo de relatório;
 3. agrupa por motorista (``Apelido``) ou transportadora (``TRANSPORTADOR``);
-4. para cada grupo, abre o template no Excel via xlwings, substitui os dados
-   da tabela, recalcula, atualiza as consultas e salva um arquivo novo.
+4. para cada grupo, preenche a tabela do template no Excel, recalcula,
+   atualiza as consultas e salva um arquivo novo. Nos relatórios com
+   ``ReportType.reuse_template`` (Transportador) o template é aberto uma única
+   vez e cada grupo é salvo com ``SaveCopyAs``, mantendo o modelo de dados
+   quente entre os grupos.
 
 Todos os caminhos vêm de :class:`~backend.models.JobConfig`; nada é fixo no
 código.
@@ -15,7 +18,10 @@ código.
 from __future__ import annotations
 
 import importlib
+import importlib.util
+import shutil
 import sys
+import tempfile
 import time
 import warnings
 from pathlib import Path
@@ -40,6 +46,10 @@ CancelCallback = Callable[[], bool]
 # Constantes do Excel (mesmos valores usados nos notebooks).
 XL_CALCULATION_MANUAL = -4135
 XL_CALCULATION_AUTOMATIC = -4105
+
+# Leitura rápida com python-calamine quando instalado (7x mais rápido que
+# openpyxl em planilhas grandes). Sem ele, o pandas usa openpyxl.
+_CALAMINE_AVAILABLE = importlib.util.find_spec("python_calamine") is not None
 
 _ICON_OK = "success"
 _ICON_INFO = "info"
@@ -138,21 +148,27 @@ class DashboardProcessor:
         pythoncom = self._init_com()
 
         app = None
+        workbook = None
+        temp_dir: str | None = None
         total = len(groups)
         used_names: dict[str, int] = {}
+        reuse = config.report_type.reuse_template
         try:
-            try:
-                app = xlwings.App(visible=False, add_book=False)
-            except Exception as exc:  # noqa: BLE001 - erro do Excel/COM
-                raise JobError(
-                    "Não foi possível abrir o Microsoft Excel. Verifique se o "
-                    "Excel está instalado e se não há uma janela modal "
-                    "(ex.: caixa de diálogo) bloqueando a automação.\n\n"
-                    f"Detalhe técnico: {exc}"
-                ) from exc
+            app = self._start_excel(xlwings)
 
-            app.display_alerts = False
-            app.screen_updating = False
+            # Trabalha com uma cópia do template: evita conflito (arquivo
+            # aberto no Excel / somente leitura).
+            temp_dir = tempfile.mkdtemp(prefix="ins_dashboard_")
+            template_copy = Path(temp_dir) / config.template_file.name
+            self._copy_template(config.template_file, template_copy)
+
+            if reuse:
+                # Abre o template uma única vez; o modelo/pivôs ficam quentes
+                # entre os grupos (grande ganho em templates com Data Model).
+                workbook = self._open_template(
+                    app, template_copy, config.template_file
+                )
+                app.api.Calculation = XL_CALCULATION_MANUAL
 
             for index, (group_name, group_data) in enumerate(groups, start=1):
                 self._check_cancel()
@@ -167,8 +183,28 @@ class DashboardProcessor:
                     config.report_type, group_name, used_names
                 )
                 self._ensure_not_original(config, output_path)
+
+                if not reuse:
+                    workbook = self._open_template(
+                        app, template_copy, config.template_file
+                    )
+                    app.api.Calculation = XL_CALCULATION_MANUAL
+
+                # Recapturamos a cada grupo: o Resize invalida o proxy COM do
+                # ListObject e o clear precisa atingir o corpo atual.
+                sheet = self._template_sheet(workbook, config.report_type)
+                table = self._template_table(sheet, config.report_type)
+                last_column = self._template_last_column(
+                    sheet, group_data.shape[1]
+                )
                 self._write_dashboard(
-                    xlwings, app, config, group_data, output_path
+                    app,
+                    workbook,
+                    sheet,
+                    table,
+                    last_column,
+                    group_data,
+                    output_path,
                 )
 
                 result.outputs.append(
@@ -181,6 +217,10 @@ class DashboardProcessor:
                 result.total_rows += len(group_data)
                 self._log(f"Salvo: {output_path.name}", _ICON_OK)
 
+                if not reuse:
+                    self._close_workbook(workbook)
+                    workbook = None
+
             result.duration_seconds = time.perf_counter() - started
             self._log(
                 f"Concluído: {result.dashboard_count} dashboard(s) gerado(s) "
@@ -189,8 +229,12 @@ class DashboardProcessor:
             )
             return result
         finally:
+            if workbook is not None:
+                self._close_workbook(workbook)
             if app is not None:
                 self._close_excel(app)
+            if temp_dir is not None:
+                shutil.rmtree(temp_dir, ignore_errors=True)
             if pythoncom is not None:
                 try:
                     pythoncom.CoUninitialize()
@@ -202,6 +246,9 @@ class DashboardProcessor:
     # ------------------------------------------------------------------
     def _load_source(self, config: JobConfig) -> pd.DataFrame:
         report = config.report_type
+        read_options: dict[str, object] = {"sheet_name": report.source_sheet}
+        if _CALAMINE_AVAILABLE:
+            read_options["engine"] = "calamine"
         try:
             # O notebook do transportador silencia UserWarning do openpyxl
             # (células com formatação/estilo incomum). Mantemos o mesmo cuidado.
@@ -209,9 +256,7 @@ class DashboardProcessor:
                 warnings.filterwarnings(
                     "ignore", category=UserWarning, module="openpyxl"
                 )
-                dataframe = pd.read_excel(
-                    config.source_file, sheet_name=report.source_sheet
-                )
+                dataframe = pd.read_excel(config.source_file, **read_options)
         except ValueError as exc:
             raise JobError(
                 f"A aba '{report.source_sheet}' não foi encontrada em "
@@ -397,84 +442,113 @@ class DashboardProcessor:
             return None
         return pythoncom
 
+    @staticmethod
+    def _start_excel(xlwings):
+        """Abre (uma única vez) a instância invisível do Excel."""
+        try:
+            app = xlwings.App(visible=False, add_book=False)
+        except Exception as exc:  # noqa: BLE001 - erro do Excel/COM
+            raise JobError(
+                "Não foi possível abrir o Microsoft Excel. Verifique se o "
+                "Excel está instalado e se não há uma janela modal "
+                "(ex.: caixa de diálogo) bloqueando a automação.\n\n"
+                f"Detalhe técnico: {exc}"
+            ) from exc
+        app.display_alerts = False
+        app.screen_updating = False
+        return app
+
+    @staticmethod
+    def _copy_template(source: Path, destination: Path) -> None:
+        """Copia o template para uma pasta temporária antes de abrir."""
+        try:
+            shutil.copy2(source, destination)
+        except OSError as exc:
+            raise JobError(
+                "Não foi possível preparar o template para a geração. Feche o "
+                "arquivo se estiver aberto no Excel e tente novamente.\n\n"
+                f"Template: {source}\n\nDetalhe técnico: {exc}"
+            ) from exc
+
+    @staticmethod
+    def _open_template(app, template_copy: Path, original: Path):
+        try:
+            return app.books.open(str(template_copy))
+        except Exception as exc:  # noqa: BLE001
+            raise JobError(
+                "Não foi possível abrir o template no Excel. Feche o "
+                "arquivo se estiver aberto e tente novamente.\n\n"
+                f"Template: {original}\n"
+                f"Detalhe técnico: {exc}"
+            ) from exc
+
+    def _template_sheet(self, workbook, report: ReportType):
+        try:
+            return workbook.sheets[report.template_sheet]
+        except Exception as exc:  # noqa: BLE001
+            available = self._sheet_names(workbook)
+            raise JobError(
+                f"A aba '{report.template_sheet}' não existe no template. "
+                f"Abas encontradas: {available or 'nenhuma'}."
+            ) from exc
+
+    def _template_table(self, sheet, report: ReportType):
+        try:
+            return sheet.tables[report.template_table]
+        except Exception as exc:  # noqa: BLE001
+            available = self._table_names(sheet)
+            raise JobError(
+                f"A tabela '{report.template_table}' não existe na aba "
+                f"'{report.template_sheet}' do template. Tabelas "
+                f"encontradas: {available or 'nenhuma'}."
+            ) from exc
+
+    @staticmethod
+    def _template_last_column(sheet, total_columns: int) -> str:
+        address = str(sheet.range((1, total_columns)).address)
+        return address.split("$")[1]
+
     def _write_dashboard(
         self,
-        xlwings,
         app,
-        config: JobConfig,
+        workbook,
+        sheet,
+        table,
+        last_column: str,
         group_data: pd.DataFrame,
         output_path: Path,
     ) -> None:
-        report = config.report_type
-        workbook = None
+        """Preenche o workbook já aberto e salva uma cópia para o grupo."""
+        row_count = len(group_data)
+
+        if table.data_body_range is not None:
+            table.data_body_range.clear_contents()
+
+        # Escreve a partir de A2 (sem cabeçalho nem índice).
+        sheet.range("A2").options(index=False, header=False).value = group_data
+
+        table.resize(sheet.range(f"A1:{last_column}{row_count + 1}"))
+
+        app.api.Calculation = XL_CALCULATION_AUTOMATIC
         try:
-            try:
-                workbook = app.books.open(str(config.template_file))
-            except Exception as exc:  # noqa: BLE001
-                raise JobError(
-                    "Não foi possível abrir o template no Excel. Feche o "
-                    "arquivo se estiver aberto e tente novamente.\n\n"
-                    f"Template: {config.template_file}\n"
-                    f"Detalhe técnico: {exc}"
-                ) from exc
+            workbook.api.RefreshAll()
+        except Exception as exc:  # noqa: BLE001 - nem todo template tem consultas
+            self._log(
+                "Aviso: o Excel não conseguiu atualizar as consultas do "
+                f"template ({exc}). O dashboard foi salvo mesmo assim.",
+                _ICON_WARNING,
+            )
+        app.api.Calculation = XL_CALCULATION_MANUAL
 
-            app.api.Calculation = XL_CALCULATION_MANUAL
-
-            try:
-                sheet = workbook.sheets[report.template_sheet]
-            except Exception as exc:  # noqa: BLE001
-                available = self._sheet_names(workbook)
-                raise JobError(
-                    f"A aba '{report.template_sheet}' não existe no template. "
-                    f"Abas encontradas: {available or 'nenhuma'}."
-                ) from exc
-
-            try:
-                table = sheet.tables[report.template_table]
-            except Exception as exc:  # noqa: BLE001
-                available = self._table_names(sheet)
-                raise JobError(
-                    f"A tabela '{report.template_table}' não existe na aba "
-                    f"'{report.template_sheet}' do template. Tabelas "
-                    f"encontradas: {available or 'nenhuma'}."
-                ) from exc
-
-            row_count = len(group_data)
-            total_columns = group_data.shape[1]
-            last_column = sheet.range((1, total_columns)).address.split("$")[1]
-
-            if table.data_body_range is not None:
-                table.data_body_range.clear_contents()
-
-            # Escreve a partir de A2 (sem cabeçalho nem índice).
-            sheet.range("A2").options(index=False, header=False).value = group_data
-
-            table.resize(sheet.range(f"A1:{last_column}{row_count + 1}"))
-
-            app.api.Calculation = XL_CALCULATION_AUTOMATIC
-
-            try:
-                workbook.api.RefreshAll()
-            except Exception as exc:  # noqa: BLE001 - nem todo template tem consultas
-                self._log(
-                    "Aviso: o Excel não conseguiu atualizar as consultas do "
-                    f"template ({exc}). O dashboard foi salvo mesmo assim.",
-                    _ICON_WARNING,
-                )
-
-            self._check_cancel()
-            self._save_workbook(workbook, output_path)
-        finally:
-            if workbook is not None:
-                try:
-                    workbook.close()
-                except Exception:  # noqa: BLE001
-                    pass
+        self._check_cancel()
+        self._save_workbook(workbook, output_path)
 
     @staticmethod
     def _save_workbook(workbook, output_path: Path) -> None:
         # Regenerações sobrescrevem o dashboard anterior. Removemos o arquivo
-        # antes do SaveAs para o Excel não exibir o diálogo "já existe".
+        # antes do SaveCopyAs para o Excel não exibir o diálogo "já existe".
+        # SaveCopyAs mantém o template em memória intacto para o próximo grupo
+        # (workbook.save renomearia o livro em uso).
         if output_path.exists():
             try:
                 output_path.unlink()
@@ -485,7 +559,7 @@ class DashboardProcessor:
                     f"Destino: {output_path}"
                 ) from exc
         try:
-            workbook.save(str(output_path))
+            workbook.api.SaveCopyAs(str(output_path))
         except PermissionError as exc:
             raise JobError(
                 "Sem permissão para salvar o dashboard. Feche o arquivo se ele "
@@ -512,6 +586,13 @@ class DashboardProcessor:
             return ", ".join(table.name for table in sheet.tables)
         except Exception:  # noqa: BLE001
             return ""
+
+    @staticmethod
+    def _close_workbook(workbook) -> None:
+        try:
+            workbook.close()
+        except Exception:  # noqa: BLE001
+            pass
 
     def _close_excel(self, app) -> None:
         try:

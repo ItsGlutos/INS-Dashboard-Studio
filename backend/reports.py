@@ -40,6 +40,7 @@ class ReportType:
     keep_columns: tuple[str, ...] = ()
     drop_columns: tuple[str, ...] = ()
     uppercase_group_values: bool = False
+    reuse_template: bool = False
 
     @property
     def uses_keep_list(self) -> bool:
@@ -94,6 +95,10 @@ TRANSPORTADOR = ReportType(
     group_column="TRANSPORTADOR",
     output_prefix="INS do Transportador",
     uppercase_group_values=True,
+    # Template com Data Model + tabelas dinâmicas OLAP: o template é aberto
+    # uma única vez e cada grupo é salvo com SaveCopyAs, mantendo o modelo
+    # quente entre os grupos (pivôs e formas do Resumo permanecem intactos).
+    reuse_template=True,
     drop_columns=(
         "TIPO DA ROTA",
         "CD + Transportadora",
