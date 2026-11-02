@@ -9,8 +9,9 @@ Aplicativo desktop (Windows) para a rotina mensal de **INS**:
    cada transportadora, com assunto e corpo editáveis, cópia (CC) e
    confirmação antes de qualquer disparo.
 
-A interface foi construída em **PyQt6** com estética *Frutiger Aero* (vidro,
-céu em degradê e botões glossy). O processamento dos dashboards usa
+A interface foi construída em **PyQt6** com a identidade visual institucional
+GrupoSC (azul-marinho, laranja de destaque, tipografia Chivo e temas claro e
+escuro). O processamento dos dashboards usa
 **pandas + xlwings** para preencher o template no Microsoft Excel e salvar um
 arquivo por motorista/transportadora. Os envios usam **pywin32** para falar com
 o Outlook.
@@ -50,6 +51,10 @@ ou dê duplo clique em `iniciar.bat`.
 A janela principal tem duas abas: **Geração de dashboards** e
 **Envios de INS**. As preferências de cada aba são lembradas entre execuções
 via `QSettings`.
+
+O botão sol/lua no canto direito do cabeçalho alterna entre o **tema claro** e
+o **tema escuro**; a escolha também é lembrada entre execuções. Nada no fluxo
+de geração ou envio muda com a troca de tema: é apenas aparência.
 
 ## Aba Geração de dashboards
 
@@ -168,7 +173,7 @@ pode ser **exportado para CSV** ou limpo.
 - Controles têm nome acessível e os campos exibem anel de foco com contraste
   reforçado, incluindo botões, abas, tabelas e listas.
 - Cores de status, botões e textos foram ajustadas para manter contraste
-  legível sobre os painéis de vidro.
+  legível nos temas claro e escuro.
 
 ## Estrutura
 
@@ -185,8 +190,10 @@ ins_dashboard_app/
 │   ├── processor.py         # leitura, agrupamento e automação do Excel
 │   └── envios.py            # contatos, plano de envios e Outlook
 ├── ui/
-│   ├── theme.py             # paleta e QSS Frutiger Aero
-│   ├── widgets.py           # fundo, vidro, botões, checkbox, seletores, log
+│   ├── theme.py             # paletas clara/escura e QSS institucional
+│   ├── icons.py             # ícones vetoriais desenhados em QPainter
+│   ├── widgets.py           # fundo, cartões, botões, checkbox, seletores, console
+│   ├── assets/fonts/        # Chivo (OFL) embarcada para uso offline
 │   ├── worker.py            # QThread da geração de dashboards
 │   ├── envios_worker.py     # QThread do planejamento e do envio
 │   ├── envios_dialog.py     # confirmação visual antes do disparo

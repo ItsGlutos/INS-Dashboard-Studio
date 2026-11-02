@@ -1,24 +1,23 @@
-"""Interface gráfica do INS Dashboard Studio (PyQt6, visual Frutiger Aero).
+"""Interface gráfica do INS Dashboard Studio (PyQt6, identidade GrupoSC).
 
 Módulos:
 
-* :mod:`ui.theme` -- paleta de cores e folha de estilo QSS;
-* :mod:`ui.widgets` -- componentes reutilizáveis (céu, vidro, botões, log…);
+* :mod:`ui.theme` -- paletas clara/escura e folha de estilo QSS;
+* :mod:`ui.icons` -- ícones vetoriais desenhados com ``QPainter``;
+* :mod:`ui.widgets` -- componentes reutilizáveis (cartões, botões, console…);
 * :mod:`ui.worker` -- execução do backend em ``QThread``;
 * :mod:`ui.main_window` -- janela principal.
 
 .. note::
-   **O visual (Frutiger Aero) será refeito em breve.** Ao ler este pacote,
-   separe mentalmente duas camadas:
+   Ao ler este pacote, separe mentalmente duas camadas:
 
-   * **estética** -- QSS, cores, ``QPainter``, sombras, animações e tamanhos.
-     Pode ser substituída no redesign sem afetar o restante do app.
+   * **estética** -- QSS, cores, ``QPainter``, ícones, espaçamentos e temas.
    * **funcional** -- ligação de sinais, threads, validações, persistência
-     (``QSettings``), acessibilidade e regras de negócio. **Deve ser
-     preservada** no redesign.
+     (``QSettings``), acessibilidade e regras de negócio.
 
    Os componentes de :mod:`ui.widgets` expõem uma API pública estável; o
    desenho interno pode mudar, mas os nomes/métodos usados pelas telas não.
+   A alternância claro/escuro é a única interação acrescentada ao aplicativo.
 """
 
 from __future__ import annotations
@@ -32,4 +31,4 @@ _APP_DIR = Path(__file__).resolve().parent.parent
 if str(_APP_DIR) not in sys.path:
     sys.path.insert(0, str(_APP_DIR))
 
-__all__ = ["main_window", "theme", "widgets", "worker"]
+__all__ = ["icons", "main_window", "theme", "widgets", "worker"]

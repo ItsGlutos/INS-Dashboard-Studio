@@ -1,29 +1,32 @@
 """Componentes reutilizáveis da interface do INS Dashboard Studio.
 
-Todos os elementos visuais são desenhados em código (``QPainter``/QSS),
-sem imagens externas:
+O vocabulário visual é o do manual institucional GrupoSC: cartões de aresta
+8 px, tipografia Chivo, azul operacional e laranja de destaque.  Dois temas
+(claro e escuro) compartilham os mesmos componentes; as cores vêm de
+:mod:`ui.theme` em tempo de pintura, então a troca de tema é imediata.
 
-* :class:`SkyBackground` -- céu em degradê com sol, nuvens e bolhas em movimento;
-* :class:`GlassPanel` -- painel de vidro translúcido com sombra;
-* :class:`GlossyButton` -- botão glossy com brilho superior;
-* :class:`SegmentedSelector` -- seletor segmentado (Motorista/Transportador);
-* :class:`FileSelector` -- seletor de arquivo/pasta com ``QFileDialog``;
-* :class:`LogView` -- área de log colorida por nível;
-* :class:`StatusLed` -- indicador de status tipo LED.
+Componentes:
+
+* :class:`SkyBackground` -- fundo institucional (gradiente + malha discreta);
+* :class:`GlassPanel` / :class:`AccentCard` -- cartões de conteúdo;
+* :class:`GlossyButton`, :class:`NavButton`, :class:`ThemeToggle` -- botões;
+* :class:`SegmentedSelector` -- seletor Motorista/Transportador;
+* :class:`FileSelector` -- caminho de arquivo/pasta com ``QFileDialog``;
+* :class:`Badge`, :class:`IconWidget`, :class:`IconTile` -- detalhes visuais;
+* :class:`LogView` -- console de processamento colorido por nível;
+* :class:`StatusLed` -- indicador de estado.
 
 .. note::
-   **O visual será refeito.** Os componentes abaixo desenham o tema Frutiger
-   Aero com ``QPainter``/QSS. O *desenho* (gradientes, sombras, animações,
-   elipses do céu) é estética e pode ser substituído no redesign. O que NÃO
-   deve mudar é a **API pública** consumida pelas telas: ``path``,
-   ``set_path``, ``current``, ``set_current``, ``changed``,
-   ``selectionChanged``, ``append_log``, ``set_state`` etc. -- junto com os
-   ``objectName`` usados pelo QSS de :mod:`ui.theme`.
+   As APIs consumidas pelas telas (``path``, ``set_path``, ``current``,
+   ``set_current``, ``changed``, ``selectionChanged``, ``append_log``,
+   ``set_state``) e os ``objectName`` usados pelo QSS devem ser preservados.
+   Os métodos ``refresh_theme`` são visuais: repintam ícones/pixmaps quando o
+   tema muda.
 """
 
 from __future__ import annotations
 
-import random
+from datetime import datetime
 from pathlib import Path
 
 from PyQt6.QtCore import (
@@ -31,8 +34,8 @@ from PyQt6.QtCore import (
     QPointF,
     QPropertyAnimation,
     QRectF,
+    QSize,
     Qt,
-    QTimer,
     pyqtProperty,
     pyqtSignal,
 )
@@ -40,10 +43,12 @@ from PyQt6.QtGui import (
     QBrush,
     QColor,
     QFont,
+    QFontMetrics,
     QIcon,
     QLinearGradient,
     QPainter,
     QPainterPath,
+    QPalette,
     QPen,
     QPixmap,
     QRadialGradient,
@@ -53,7 +58,6 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QFileDialog,
     QFrame,
-    QGraphicsDropShadowEffect,
     QHBoxLayout,
     QLabel,
     QPlainTextEdit,
@@ -64,267 +68,460 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from .theme import LED_COLORS, LOG_COLORS
+from .icons import icon as vector_icon
+from .icons import icon_pixmap
+from .theme import (
+    APP_FONT,
+    LOG_COLORS,
+    LOG_LABELS,
+    led_color,
+    palette,
+)
 
 __all__ = [
+    "AccentCard",
     "AeroCheckBox",
+    "Badge",
     "FileSelector",
     "GlassPanel",
     "GlossyButton",
+    "IconTile",
+    "IconWidget",
     "LogView",
+    "NavButton",
     "SegmentedSelector",
-    "StatusLed",
     "SkyBackground",
+    "StatusLed",
+    "ThemeToggle",
     "create_app_icon",
 ]
 
+# Mapeamento papel semântico -> chave da paleta.
+_ROLE_KEYS = {
+    "text": "text",
+    "body": "body",
+    "muted": "muted",
+    "subtle": "subtle",
+    "faint": "faint",
+    "accent": "accent",
+    "accent_deep": "accent_deep",
+    "orange": "orange",
+    "orange_deep": "orange_deep",
+    "success": "ok_text",
+    "danger": "danger",
+    "inverse": "inverse",
+    "header_text": "header_text",
+    "header_muted": "header_muted",
+    "nav_text": "nav_text",
+    "nav_active": "nav_active_text",
+    "warning": "warn_text",
+    "white": "#FFFFFF",
+}
+
+
+def tone(role: str) -> str:
+    """Resolve um papel semântico para uma cor hexadecimal do tema atual."""
+    if role.startswith("#"):
+        return role
+    chave = _ROLE_KEYS.get(role, "text")
+    if chave.startswith("#"):
+        return chave
+    return palette()[chave]
+
 
 # ---------------------------------------------------------------------------
-# Fundo animado
+# Fundo institucional
 # ---------------------------------------------------------------------------
-# 100% estético: céu, sol, nuvens e bolhas não têm função de negócio. No
-# redesign, todo este bloco pode ser trocado por outra arte/imagem.
 class SkyBackground(QWidget):
-    """Fundo com céu em degradê, sol, nuvens e bolhas translúcidas."""
+    """Fundo institucional: gradiente sutil + malha discreta.
+
+    Substitui o antigo céu Frutiger Aero.  Não há animação nem imagens; o
+    desenho é 100% decorativo e acompanha o tema ativo.
+    """
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setObjectName("skyBackground")
-        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
-        self._bubbles: list[dict[str, float]] = []
-        self._spawn_initial_bubbles()
-        self._timer = QTimer(self)
-        self._timer.setInterval(45)
-        self._timer.timeout.connect(self._advance_bubbles)
-        self._timer.start()
+        self.setObjectName("appBackground")
+        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
 
-    # -- criação das bolhas -------------------------------------------------
-    def _spawn_initial_bubbles(self) -> None:
-        """Distribui as bolhas iniciais pela tela."""
-        random.seed(20260101)
-        for _ in range(26):
-            self._bubbles.append(self._new_bubble(spread=True))
-
-    def _new_bubble(self, spread: bool = True) -> dict[str, float]:
-        """Cria os parâmetros de uma bolha translúcida."""
-        radius = random.uniform(10, 46) if spread else random.uniform(8, 30)
-        return {
-            "x": random.uniform(0.0, 1.0),
-            "y": random.uniform(0.0, 1.0),
-            "r": radius,
-            "speed": random.uniform(0.00018, 0.00065),
-            "alpha": random.uniform(28, 78),
-        }
-
-    def _advance_bubbles(self) -> None:
-        """Move as bolhas para cima e redesenha o fundo."""
-        height = max(1, self.height())
-        width = max(1, self.width())
-        for bubble in self._bubbles:
-            bubble["y"] -= bubble["speed"]
-            if bubble["y"] < -0.12:
-                bubble.update(self._new_bubble(False))
-                bubble["x"] = random.uniform(0.0, 1.0)
-                bubble["y"] = 1.05
-                bubble["r"] = random.uniform(8, 40)
-        self.update()
-
-    # -- pintura ------------------------------------------------------------
     def paintEvent(self, event) -> None:  # noqa: N802 (API Qt)
-        """Desenha o céu, o sol, as nuvens e as bolhas."""
+        """Pinta o degradê, a malha e os brilhos de canto."""
+        p = palette()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         width = max(1, self.width())
         height = max(1, self.height())
 
-        # Céu em degradê vertical.
-        sky = QLinearGradient(0, 0, 0, height)
-        sky.setColorAt(0.0, QColor("#04305f"))
-        sky.setColorAt(0.18, QColor("#0a4d8c"))
-        sky.setColorAt(0.42, QColor("#1e90ff"))
-        sky.setColorAt(0.66, QColor("#63c8f5"))
-        sky.setColorAt(0.86, QColor("#a9e6fb"))
-        sky.setColorAt(1.0, QColor("#e6faff"))
-        painter.fillRect(self.rect(), sky)
+        escuro = p["theme"] == "dark"
+        gradiente = QLinearGradient(0, 0, 0, height)
+        if escuro:
+            gradiente.setColorAt(0.0, QColor("#0C1730"))
+            gradiente.setColorAt(0.55, QColor("#101B33"))
+            gradiente.setColorAt(1.0, QColor("#0B1428"))
+        else:
+            gradiente.setColorAt(0.0, QColor("#F4F7FC"))
+            gradiente.setColorAt(0.55, QColor("#F8FAFC"))
+            gradiente.setColorAt(1.0, QColor("#EEF3FA"))
+        painter.fillRect(self.rect(), gradiente)
 
-        # Brilho do sol (canto superior direito).
-        sun_center = QPointF(width * 0.80, height * 0.06)
-        glow = QRadialGradient(sun_center, max(width, height) * 0.55)
-        glow.setColorAt(0.0, QColor(255, 253, 226, 210))
-        glow.setColorAt(0.12, QColor(255, 246, 190, 120))
-        glow.setColorAt(0.35, QColor(255, 255, 255, 45))
-        glow.setColorAt(1.0, QColor(255, 255, 255, 0))
-        painter.setBrush(QBrush(glow))
+        # Brilho azul discreto no canto superior direito.
+        brilho = QRadialGradient(
+            QPointF(width * 0.86, height * 0.02), max(width, height) * 0.55
+        )
+        brilho.setColorAt(
+            0.0,
+            QColor(51, 166, 222, 34 if escuro else 26),
+        )
+        brilho.setColorAt(1.0, QColor(51, 166, 222, 0))
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(sun_center, max(width, height) * 0.55, max(width, height) * 0.55)
+        painter.setBrush(QBrush(brilho))
+        painter.drawRect(self.rect())
 
-        # Discos do sol.
-        painter.setBrush(QBrush(QColor(255, 255, 235, 235)))
-        painter.drawEllipse(sun_center, 34, 34)
-        painter.setBrush(QBrush(QColor(255, 255, 255, 90)))
-        painter.drawEllipse(sun_center, 52, 52)
-
-        # Nuvens translúcidas.
-        self._draw_cloud(painter, QPointF(width * 0.18, height * 0.13), 1.0)
-        self._draw_cloud(painter, QPointF(width * 0.62, height * 0.27), 0.7)
-        self._draw_cloud(painter, QPointF(width * 0.88, height * 0.55), 0.5)
-
-        # Reflexos em faixas (água) na parte inferior.
-        self._draw_water_reflections(painter, width, height)
-
-        # Bolhas translúcidas subindo.
-        for bubble in self._bubbles:
-            self._draw_bubble(painter, bubble, width, height)
-
+        # Malha técnica de 40 px (institucional, quase imperceptível).
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(
+            QPen(QColor(148, 163, 184, 16 if escuro else 22), 1)
+        )
+        passo = 40
+        for x in range(0, width, passo):
+            painter.drawLine(x, 0, x, height)
+        for y in range(0, height, passo):
+            painter.drawLine(0, y, width, y)
         painter.end()
 
-    @staticmethod
-    def _draw_cloud(painter: QPainter, center: QPointF, scale: float) -> None:
-        """Desenha uma nuvem macia composta por elipses."""
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(QColor(255, 255, 255, 46)))
-        for offset, radius in (
-            (-46, 30),
-            (-14, 42),
-            (24, 34),
-            (52, 22),
-        ):
-            painter.drawEllipse(
-                QPointF(center.x() + offset * scale, center.y() - radius * 0.18),
-                radius * scale,
-                radius * 0.62 * scale,
-            )
-
-    @staticmethod
-    def _draw_water_reflections(painter: QPainter, width: int, height: int) -> None:
-        """Desenha faixas de reflexo onduladas na base do céu."""
-        painter.setPen(Qt.PenStyle.NoPen)
-        for index in range(7):
-            y = height * 0.74 + index * (height * 0.035)
-            alpha = max(6, 42 - index * 5)
-            painter.setBrush(QBrush(QColor(255, 255, 255, alpha)))
-            painter.drawRect(
-                QRectF(
-                    width * 0.02,
-                    y,
-                    width * 0.96,
-                    max(2.0, height * 0.008),
-                )
-            )
-
-    @staticmethod
-    def _draw_bubble(
-        painter: QPainter,
-        bubble: dict[str, float],
-        width: int,
-        height: int,
-    ) -> None:
-        """Desenha uma bolha translúcida com reflexo."""
-        center = QPointF(
-            bubble["x"] * width,
-            bubble["y"] * height,
-        )
-        radius = bubble["r"]
-        alpha = int(bubble["alpha"])
-
-        halo = QRadialGradient(center, radius * 1.5)
-        halo.setColorAt(0.0, QColor(255, 255, 255, int(alpha * 0.35)))
-        halo.setColorAt(1.0, QColor(255, 255, 255, 0))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(halo))
-        painter.drawEllipse(center, radius * 1.5, radius * 1.5)
-
-        body = QRadialGradient(
-            QPointF(center.x() - radius * 0.3, center.y() - radius * 0.35),
-            radius * 1.25,
-        )
-        body.setColorAt(0.0, QColor(255, 255, 255, int(alpha * 1.25)))
-        body.setColorAt(0.55, QColor(190, 240, 255, int(alpha * 0.55)))
-        body.setColorAt(1.0, QColor(120, 205, 255, int(alpha * 0.18)))
-        painter.setBrush(QBrush(body))
-        painter.setPen(QPen(QColor(255, 255, 255, min(210, alpha + 90)), 1.4))
-        painter.drawEllipse(center, radius, radius)
-
-        # Reflexo pontual no topo da bolha.
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(QColor(255, 255, 255, min(235, alpha + 130))))
-        painter.drawEllipse(
-            QPointF(center.x() - radius * 0.34, center.y() - radius * 0.42),
-            radius * 0.17,
-            radius * 0.11,
-        )
+    def refresh_theme(self) -> None:
+        """Repinta o fundo após a troca de tema."""
+        self.update()
 
 
 # ---------------------------------------------------------------------------
-# Painel de vidro
+# Cartões
 # ---------------------------------------------------------------------------
-# Aparência (fundo translúcido + sombra). As telas apenas usam GlassPanel como
-# container; um novo tema pode substituir por QFrame/QWidget comum.
 class GlassPanel(QFrame):
-    """Painel translúcido com borda clara, cantos arredondados e sombra."""
+    """Cartão de conteúdo (aresta 8 px, borda discreta).
+
+    O nome histórico ``GlassPanel`` foi mantido para não alterar as telas que
+    já o utilizam; visualmente é um cartão plano institucional.
+    """
 
     def __init__(self, parent: QWidget | None = None, shadow: bool = True) -> None:
         super().__init__(parent)
         self.setObjectName("glassPanel")
-        if shadow:
-            effect = QGraphicsDropShadowEffect(self)
-            effect.setBlurRadius(26)
-            effect.setOffset(0, 6)
-            effect.setColor(QColor(2, 24, 48, 90))
-            self.setGraphicsEffect(effect)
+
+
+class AccentCard(QFrame):
+    """Cartão com filete institucional de 40×4 px no canto superior esquerdo."""
+
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        accent: str = "orange",
+    ) -> None:
+        super().__init__(parent)
+        self.setObjectName("card")
+        self._accent = accent
+
+    def set_accent(self, accent: str) -> None:
+        """Troca a cor do filete (``orange`` ou ``accent``)."""
+        self._accent = accent
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802 (API Qt)
+        """Desenha o cartão (QSS) e o filete de acento sobreposto."""
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(tone(self._accent)))
+        painter.drawRoundedRect(QRectF(1, 1, 40, 4), 2, 2)
+        painter.end()
 
 
 # ---------------------------------------------------------------------------
-# Botão glossy
+# Ícones e selos
 # ---------------------------------------------------------------------------
-# Aparência + um detalhe funcional: o anel de foco desenhado em paintEvent
-# garante contraste de teclado. Preserve o foco visível mesmo trocando o tema.
+class IconWidget(QWidget):
+    """Ícone vetorial colorido pelo tema atual."""
+
+    def __init__(
+        self,
+        name: str,
+        size: int = 16,
+        role: str = "accent",
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._name = name
+        self._size = size
+        self._role = role
+        self.setFixedSize(size, size)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setAccessibleName("")
+
+    def set_icon(self, name: str, role: str | None = None) -> None:
+        """Troca o desenho (e opcionalmente a cor)."""
+        self._name = name
+        if role:
+            self._role = role
+        self.update()
+
+    def set_role(self, role: str) -> None:
+        """Troca apenas a cor semântica do ícone."""
+        self._role = role
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802 (API Qt)
+        """Desenha o ícone centralizado."""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        pixmap = icon_pixmap(self._name, self._size, tone(self._role))
+        painter.drawPixmap(
+            QPointF(
+                (self.width() - self._size) / 2,
+                (self.height() - self._size) / 2,
+            ),
+            pixmap,
+        )
+        painter.end()
+
+    def refresh_theme(self) -> None:
+        """Repinta o ícone após a troca de tema."""
+        self.update()
+
+
+class IconTile(QFrame):
+    """Quadro colorido com um ícone central (usado em resumos e avisos).
+
+    No tema claro o tile de acento é azul sólido com ícone branco; no tema
+    escuro ele vira um quadro escuro com borda/ícone azuis, como no design.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        size: int = 36,
+        bg_key: str = "accent",
+        border_key: str | None = None,
+        icon_role: str = "white",
+        radius: int = 4,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._name = name
+        self._bg_key = bg_key
+        self._border_key = border_key
+        self._icon_role = icon_role
+        self._radius = radius
+        self.setFixedSize(size, size)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
+    def paintEvent(self, event) -> None:  # noqa: N802 (API Qt)
+        """Desenha fundo, borda e ícone conforme o tema ativo."""
+        p = palette()
+        escuro = p["theme"] == "dark"
+        accent_tile = self._bg_key == "accent"
+
+        if accent_tile and escuro:
+            fundo = p["surface_sunken"]
+            borda = QColor(p["accent"])
+            borda.setAlpha(90)
+            cor_icone = p["accent"]
+        else:
+            fundo = p.get(self._bg_key, self._bg_key)
+            borda = (
+                QColor(p.get(self._border_key, self._border_key))
+                if self._border_key
+                else None
+            )
+            cor_icone = tone(self._icon_role)
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setBrush(QColor(fundo))
+        painter.setPen(QPen(borda, 1) if borda else Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(
+            QRectF(0.5, 0.5, self.width() - 1, self.height() - 1),
+            self._radius,
+            self._radius,
+        )
+        tamanho = max(10, int(self.width() * 0.48))
+        pixmap = icon_pixmap(self._name, tamanho, cor_icone, 1.7)
+        painter.drawPixmap(
+            QPointF(
+                (self.width() - tamanho) / 2,
+                (self.height() - tamanho) / 2,
+            ),
+            pixmap,
+        )
+        painter.end()
+
+    def refresh_theme(self) -> None:
+        """Repinta o quadro e o ícone após a troca de tema."""
+        self.update()
+
+
+class Badge(QLabel):
+    """Selo de estado com variantes de cor (``ok``, ``idle``, ``warn``...)."""
+
+    def __init__(
+        self,
+        text: str = "",
+        variant: str = "idle",
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(text, parent)
+        self.setObjectName("badge")
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._variant = variant
+        self.setProperty("variant", variant)
+
+    def set_variant(self, variant: str) -> None:
+        """Troca a variante visual e reaplica o QSS."""
+        self._variant = variant
+        self.setProperty("variant", variant)
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+    def set_status(self, text: str, variant: str) -> None:
+        """Atalho para trocar texto e variante de uma vez."""
+        self.setText(text)
+        self.set_variant(variant)
+
+
+# ---------------------------------------------------------------------------
+# Botões
+# ---------------------------------------------------------------------------
 class GlossyButton(QPushButton):
-    """Botão com brilho glossy desenhado pelo QSS e foco visível."""
+    """Botão institucional, com variantes definidas pelo ``objectName``.
+
+    ``primaryButton`` (laranja), ``glossButton``/``miniButton`` (secundário) e
+    ``dangerButton`` (cancelar).  O ícone opcional é repintado no tema.
+    """
 
     def __init__(
         self,
         text: str = "",
         parent: QWidget | None = None,
         variant: str = "glossButton",
+        icon_name: str | None = None,
+        icon_role: str = "accent_deep",
+        icon_size: int = 15,
     ) -> None:
         super().__init__(text, parent)
         self.setObjectName(variant)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self._icon_name = icon_name
+        self._icon_role = icon_role
+        self._icon_size = icon_size
         if text:
             self.setAccessibleName(text)
+        self._refresh_icon()
 
-    def paintEvent(self, event) -> None:  # noqa: N802 (API Qt)
-        """Desenha o QSS e um contorno de foco com contraste suficiente."""
-        super().paintEvent(event)
-        if not self.hasFocus():
+    def _refresh_icon(self) -> None:
+        """Recria o ícone do botão conforme o tema/estado."""
+        if not self._icon_name:
             return
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.setPen(QPen(QColor(255, 255, 255, 220), 1))
-        painter.drawRoundedRect(
-            self.rect().adjusted(0, 0, -1, -1), 9, 9
+        self.setIcon(
+            vector_icon(
+                self._icon_name,
+                self._icon_size,
+                tone(self._icon_role),
+            )
         )
-        painter.setPen(QPen(QColor("#06345c"), 2))
-        painter.drawRoundedRect(
-            self.rect().adjusted(2, 2, -2, -2), 8, 8
+        self.setIconSize(QSize(self._icon_size, self._icon_size))
+
+    def refresh_theme(self) -> None:
+        """Repinta o ícone após a troca de tema."""
+        self._refresh_icon()
+        self.update()
+
+
+class NavButton(QPushButton):
+    """Botão de navegação principal com ícone e estado ativo."""
+
+    def __init__(
+        self,
+        text: str,
+        icon_name: str,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(text, parent)
+        self.setObjectName("navButton")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setCheckable(False)
+        self._icon_name = icon_name
+        self._active = False
+        self.setAccessibleName(text)
+        self.setIconSize(QSize(15, 15))
+        self.setProperty("active", "false")
+        self._refresh_icon()
+
+    def set_active(self, active: bool) -> None:
+        """Marca o botão como aba ativa e atualiza o ícone."""
+        self._active = active
+        self.setProperty("active", "true" if active else "false")
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self._refresh_icon()
+
+    def setText(self, text: str) -> None:  # noqa: N802 (API Qt)
+        """Atualiza o rótulo e garante largura suficiente para ele."""
+        super().setText(text)
+        metrics = QFontMetrics(self.font())
+        self.setMinimumWidth(metrics.horizontalAdvance(text) + 70)
+
+    def _refresh_icon(self) -> None:
+        """Recria o ícone com a cor do estado atual."""
+        role = "nav_active" if self._active else "nav_text"
+        self.setIcon(vector_icon(self._icon_name, 15, tone(role)))
+
+    def refresh_theme(self) -> None:
+        """Repinta o ícone após a troca de tema."""
+        self._refresh_icon()
+
+
+class ThemeToggle(QToolButton):
+    """Alternador claro/escuro (única função nova do redesign)."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("themeToggle")
+        self.setCheckable(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFixedSize(32, 32)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setAccessibleName("Alternar tema claro e escuro")
+        self.setToolTip("Ativar modo escuro")
+        self._update_icon()
+
+    def _update_icon(self) -> None:
+        """Mostra a lua quando o escuro está ativo e o sol quando não está."""
+        escuro = self.isChecked()
+        self.setIcon(
+            vector_icon(
+                "moon" if escuro else "sun",
+                16,
+                tone("header_text"),
+            )
         )
-        painter.end()
+        self.setIconSize(QSize(16, 16))
+        self.setToolTip("Ativar tema claro" if escuro else "Ativar modo escuro")
+
+    def refresh_theme(self) -> None:
+        """Reavalia o ícone conforme o tema atual."""
+        self._update_icon()
 
 
 # ---------------------------------------------------------------------------
-# Checkbox Aero
+# Checkbox institucional
 # ---------------------------------------------------------------------------
-# Aparência (indicador desenhado à mão). A semântica é a de um QCheckBox
-# normal: `isChecked`/`toggled` são usados pela lógica das telas.
 class AeroCheckBox(QCheckBox):
-    """Checkbox com indicador de vidro e checkmark desenhados em código.
+    """Checkbox desenhado em código, com alvo mínimo de 26 px.
 
-    O indicador padrão do Fusion herda cores do tema e fica ilegível sobre o
-    painel de vidro; este desenho mantém o mesmo vocabulário visual dos
-    botões glossy.
+    A semântica é a de um ``QCheckBox`` normal: ``isChecked``/``toggled`` são
+    usados pela lógica das telas.
     """
 
     def __init__(self, text: str = "", parent: QWidget | None = None) -> None:
@@ -334,50 +531,47 @@ class AeroCheckBox(QCheckBox):
         if text:
             self.setAccessibleName(text)
 
-    def sizeHint(self):  # noqa: N802 (API Qt)
-        """Reserva espaço extra para o indicador desenhado manualmente."""
+    def sizeHint(self) -> QSize:  # noqa: N802 (API Qt)
+        """Reserva espaço para o indicador desenhado manualmente."""
         hint = super().sizeHint()
-        hint.setWidth(hint.width() + 10)
+        hint.setWidth(hint.width() + 8)
         hint.setHeight(max(26, hint.height()))
         return hint
 
     def paintEvent(self, event) -> None:  # noqa: N802 (API Qt)
-        """Desenha o indicador e o texto sem depender do estilo do sistema."""
+        """Desenha indicador, marca e texto conforme o tema."""
+        p = palette()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
-        box = 18.0
-        x = 3.0
+        box = 16.0
+        x = 4.0
         y = (self.height() - box) / 2.0
         rect = QRectF(x, y, box, box)
 
-        if self.isEnabled():
-            borda = QColor("#0a4d8c")
-            fundo = QColor(255, 255, 255, 235)
+        if not self.isEnabled():
+            borda = QColor(p["faint"])
+            fundo = QColor(p["surface_sunken"])
         else:
-            borda = QColor("#7f93a8")
-            fundo = QColor(232, 240, 247, 210)
+            borda = QColor(p["border_strong"])
+            fundo = QColor(p["field_bg"])
 
-        painter.setPen(QPen(borda, 1.5))
+        painter.setPen(QPen(borda, 1.4))
         painter.setBrush(QBrush(fundo))
-        painter.drawRoundedRect(rect, 4, 4)
+        painter.drawRoundedRect(rect, 3, 3)
 
         if self.isChecked():
-            gradiente = QLinearGradient(rect.topLeft(), rect.bottomLeft())
-            gradiente.setColorAt(0.0, QColor("#1e78bf"))
-            gradiente.setColorAt(1.0, QColor("#0a4d8c"))
-            painter.setPen(QPen(QColor("#06345c"), 1.0))
-            painter.setBrush(QBrush(gradiente))
-            painter.drawRoundedRect(rect, 4, 4)
-
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(QColor(p["accent"])))
+            painter.drawRoundedRect(rect, 3, 3)
             check = QPainterPath()
-            check.moveTo(x + 5.0, y + 9.0)
-            check.lineTo(x + 8.0, y + 12.0)
-            check.lineTo(x + 14.0, y + 6.0)
+            check.moveTo(x + 4.2, y + 8.2)
+            check.lineTo(x + 7.0, y + 11.0)
+            check.lineTo(x + 12.2, y + 5.2)
             painter.setPen(
                 QPen(
-                    QColor(255, 255, 255, 245),
-                    2.2,
+                    QColor("#FFFFFF"),
+                    2.0,
                     Qt.PenStyle.SolidLine,
                     Qt.PenCapStyle.RoundCap,
                     Qt.PenJoinStyle.RoundJoin,
@@ -386,34 +580,120 @@ class AeroCheckBox(QCheckBox):
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawPath(check)
 
-        painter.setPen(
-            QColor("#06345c") if self.isEnabled() else QColor("#5f7387")
-        )
+        painter.setPen(QColor(p["text"] if self.isEnabled() else p["faint"]))
         painter.setFont(self.font())
         painter.drawText(
-            self.rect().adjusted(int(x + box + 8), 0, -2, 0),
-            int(
-                Qt.AlignmentFlag.AlignVCenter
-                | Qt.AlignmentFlag.AlignLeft
-            ),
+            self.rect().adjusted(int(x + box + 7), 0, -2, 0),
+            int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft),
             self.text(),
         )
 
         if self.hasFocus():
-            painter.setPen(
-                QPen(QColor("#06345c"), 2, Qt.PenStyle.SolidLine)
-            )
+            painter.setPen(QPen(QColor(p["accent"]), 2))
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawRoundedRect(rect.adjusted(-2, -2, 2, 2), 5, 5)
+            painter.drawRoundedRect(rect.adjusted(-2.5, -2.5, 2.5, 2.5), 5, 5)
         painter.end()
+
+    def refresh_theme(self) -> None:
+        """Repinta o indicador após a troca de tema."""
+        self.update()
 
 
 # ---------------------------------------------------------------------------
 # Seletor segmentado
 # ---------------------------------------------------------------------------
-# Componente funcional: mantém a chave selecionada e emite `changed(key)`.
-# A aparência (pílula segmentada) pode mudar; a API `current`/`set_current`
-# é usada pelas duas abas e deve ser preservada.
+class _SegmentButton(QPushButton):
+    """Botão do seletor que desenha ícone, rótulo e ponto de estado ativo."""
+
+    def __init__(
+        self,
+        label: str,
+        icon_name: str,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__("", parent)
+        self._label = label
+        self._icon_name = icon_name
+        self._active = False
+        self.setObjectName("segmentButton")
+        self.setCheckable(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setAccessibleName(label)
+
+    def set_active(self, active: bool) -> None:
+        """Atualiza o estado ativo (chamado pelo seletor)."""
+        self._active = active
+        self.setProperty("active", "true" if active else "false")
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802 (API Qt)
+        """Desenha o fundo do QSS e o conteúdo ícone + texto + ponto."""
+        super().paintEvent(event)
+        p = palette()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        cor_texto = p["seg_active_text"] if self._active else p["seg_text"]
+        cor_icone = p["seg_active_icon"] if self._active else p["seg_icon"]
+        if not self.isEnabled():
+            cor_texto = p["faint"]
+            cor_icone = p["faint"]
+
+        fonte = QFont(self.font())
+        fonte.setWeight(
+            QFont.Weight.Bold if self._active else QFont.Weight.DemiBold
+        )
+        fonte.setPixelSize(13)
+        painter.setFont(fonte)
+        metrics = QFontMetrics(fonte)
+        texto_w = metrics.horizontalAdvance(self._label)
+        icone_w = 14
+        dot_w = 12 if self._active else 0
+        gap = 7
+        total = icone_w + gap + texto_w + dot_w
+        inicio = (self.width() - total) / 2.0
+        centro_y = self.height() / 2.0
+
+        pixmap = icon_pixmap(self._icon_name, icone_w, cor_icone, 1.8)
+        painter.drawPixmap(
+            QPointF(inicio, centro_y - icone_w / 2.0), pixmap
+        )
+        painter.setPen(QColor(cor_texto))
+        painter.drawText(
+            QRectF(
+                inicio + icone_w + gap,
+                0,
+                texto_w + 2,
+                self.height(),
+            ),
+            int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft),
+            self._label,
+        )
+        if self._active:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(p["seg_active_icon"]))
+            painter.drawEllipse(
+                QPointF(
+                    inicio + icone_w + gap + texto_w + 7,
+                    centro_y,
+                ),
+                2.6,
+                2.6,
+            )
+
+        if self.hasFocus():
+            painter.setPen(QPen(QColor(p["accent"]), 1.6))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(
+                QRectF(2.0, 2.0, self.width() - 4.0, self.height() - 4.0),
+                4,
+                4,
+            )
+        painter.end()
+
+
 class SegmentedSelector(QWidget):
     """Controle segmentado com dois estados mutuamente exclusivos."""
 
@@ -424,12 +704,14 @@ class SegmentedSelector(QWidget):
         options: list[tuple[str, str]],
         initial: str = "",
         parent: QWidget | None = None,
+        icons: dict[str, str] | None = None,
     ) -> None:
         super().__init__(parent)
-        self._buttons: dict[str, QPushButton] = {}
+        self._buttons: dict[str, _SegmentButton] = {}
         self._current = ""
         self._group = QButtonGroup(self)
         self._group.setExclusive(True)
+        mapa_icones = icons or {"motorista": "user", "transportador": "truck"}
 
         frame = QFrame(self)
         frame.setObjectName("segmentFrame")
@@ -438,15 +720,11 @@ class SegmentedSelector(QWidget):
         layout.setSpacing(4)
 
         for key, label in options:
-            button = QPushButton(label, frame)
-            button.setObjectName("segmentButton")
-            button.setCheckable(True)
-            button.setAccessibleName(label)
+            button = _SegmentButton(label, mapa_icones.get(key, "dot"), frame)
             button.setAccessibleDescription("Tipo de relatório")
-            button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.clicked.connect(lambda _=False, k=key: self.set_current(k))
             self._group.addButton(button)
-            layout.addWidget(button)
+            layout.addWidget(button, 1)
             self._buttons[key] = button
 
         outer = QVBoxLayout(self)
@@ -471,10 +749,8 @@ class SegmentedSelector(QWidget):
         self._current = key
         for button_key, button in self._buttons.items():
             active = button_key == key
-            button.setProperty("active", "true" if active else "false")
+            button.set_active(active)
             button.setChecked(active)
-            button.style().unpolish(button)
-            button.style().polish(button)
         if emit and changed:
             self.changed.emit(key)
 
@@ -484,13 +760,15 @@ class SegmentedSelector(QWidget):
         for button in self._buttons.values():
             button.setEnabled(enabled)
 
+    def refresh_theme(self) -> None:
+        """Repinta os botões do seletor após a troca de tema."""
+        for button in self._buttons.values():
+            button.update()
+
 
 # ---------------------------------------------------------------------------
 # Seletor de arquivo / pasta
 # ---------------------------------------------------------------------------
-# Componente funcional: encapsula QFileDialog, o caminho escolhido e o sinal
-# `selectionChanged`. A camada visual (campo de vidro, botão de limpar) pode
-# mudar, mas `path`/`set_path`/`clear` são usados na persistência QSettings.
 class FileSelector(QWidget):
     """Campo que exibe um caminho e permite escolher/limpar via QFileDialog."""
 
@@ -499,7 +777,7 @@ class FileSelector(QWidget):
     def __init__(
         self,
         caption: str,
-        button_text: str = "Procurar…",
+        button_text: str = "Procurar...",
         mode: str = "file",
         dialog_title: str = "Selecionar arquivo",
         file_filter: str = "Planilhas do Excel (*.xlsx *.xlsm)",
@@ -510,16 +788,37 @@ class FileSelector(QWidget):
         self._dialog_title = dialog_title
         self._file_filter = file_filter
         self._path = ""
+        self._caption = caption
 
+        caption_row = QHBoxLayout()
+        caption_row.setContentsMargins(0, 0, 0, 0)
+        caption_row.setSpacing(6)
+        self._caption_icon = IconWidget(
+            "file" if mode != "directory" else "folder",
+            14,
+            "accent",
+        )
         caption_label = QLabel(caption, self)
-        caption_label.setObjectName("fieldCaption")
+        caption_label.setObjectName("fieldLabel")
+        self._badge = Badge("PENDENTE", "idle")
+        self._badge.setAccessibleName(f"Situação de {caption}")
+        caption_row.addWidget(self._caption_icon)
+        caption_row.addWidget(caption_label)
+        caption_row.addStretch(1)
+        caption_row.addWidget(self._badge)
 
         self._field = QFrame(self)
-        self._field.setObjectName("glassPanel")
-        self._field.setMinimumHeight(38)
+        self._field.setObjectName("fieldFrame")
+        self._field.setMinimumHeight(40)
         field_layout = QHBoxLayout(self._field)
-        field_layout.setContentsMargins(9, 4, 5, 4)
-        field_layout.setSpacing(6)
+        field_layout.setContentsMargins(10, 3, 4, 3)
+        field_layout.setSpacing(8)
+
+        self._field_icon = IconWidget(
+            "file" if mode != "directory" else "folder",
+            15,
+            "subtle",
+        )
 
         self._path_label = QLabel("Nenhum arquivo selecionado", self._field)
         self._path_label.setObjectName("fieldPath")
@@ -530,31 +829,36 @@ class FileSelector(QWidget):
         self._path_label.setMinimumWidth(40)
         self._path_label.setAccessibleDescription(caption)
 
-        self._browse_button = QPushButton(button_text, self._field)
-        self._browse_button.setObjectName("miniButton")
-        self._browse_button.setAccessibleName(f"{button_text} — {caption}")
-        self._browse_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._browse_button.clicked.connect(self._open_dialog)
-
         self._clear_button = QToolButton(self._field)
         self._clear_button.setObjectName("clearButton")
-        self._clear_button.setText("✕")
+        self._clear_button.setIcon(vector_icon("close", 12, tone("subtle")))
+        self._clear_button.setIconSize(QSize(12, 12))
         self._clear_button.setToolTip("Limpar seleção")
         self._clear_button.setAccessibleName(f"Limpar seleção — {caption}")
         self._clear_button.setFixedSize(24, 24)
         self._clear_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self._clear_button.clicked.connect(self.clear)
         self._clear_button.setEnabled(False)
+
+        self._browse_button = QPushButton(button_text, self._field)
+        self._browse_button.setObjectName("miniButton")
+        self._browse_button.setIcon(vector_icon("search", 12, tone("text")))
+        self._browse_button.setIconSize(QSize(12, 12))
+        self._browse_button.setAccessibleName(f"{button_text} — {caption}")
+        self._browse_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._browse_button.setMinimumHeight(30)
+        self._browse_button.clicked.connect(self._open_dialog)
         caption_label.setBuddy(self._browse_button)
 
+        field_layout.addWidget(self._field_icon)
         field_layout.addWidget(self._path_label, 1)
-        field_layout.addWidget(self._browse_button)
         field_layout.addWidget(self._clear_button)
+        field_layout.addWidget(self._browse_button)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
-        layout.addWidget(caption_label)
+        layout.setSpacing(6)
+        layout.addLayout(caption_row)
         layout.addWidget(self._field)
 
     # -- API ----------------------------------------------------------------
@@ -609,12 +913,14 @@ class FileSelector(QWidget):
             self.selectionChanged.emit(self._path)
 
     def _refresh_display(self) -> None:
-        """Atualiza o texto exibido, a dica e o botão de limpar."""
+        """Atualiza o texto exibido, a dica, o selo e o botão de limpar."""
         if self._path:
             self._path_label.setProperty("empty", "false")
             self._path_label.setToolTip(self._path)
             self._field.setToolTip(self._path)
             self._clear_button.setEnabled(self.isEnabled())
+            self._badge.set_status("SELECIONADO", "ok")
+            self._path_label.setText(self._path)
         else:
             placeholder = (
                 "Nenhuma pasta selecionada"
@@ -623,8 +929,10 @@ class FileSelector(QWidget):
             )
             self._path_label.setProperty("empty", "true")
             self._path_label.setToolTip("")
+            self._path_label.setText(placeholder)
             self._field.setToolTip("")
             self._clear_button.setEnabled(False)
+            self._badge.set_status("PENDENTE", "idle")
         self._path_label.style().unpolish(self._path_label)
         self._path_label.style().polish(self._path_label)
         self._elide()
@@ -632,11 +940,6 @@ class FileSelector(QWidget):
     def _elide(self) -> None:
         """Elide o caminho no meio, conforme a largura disponível."""
         if not self._path:
-            self._path_label.setText(
-                "Nenhuma pasta selecionada"
-                if self._mode == "directory"
-                else "Nenhum arquivo selecionado"
-            )
             return
         width = max(40, self._path_label.width())
         metrics = self._path_label.fontMetrics()
@@ -649,15 +952,24 @@ class FileSelector(QWidget):
         super().resizeEvent(event)
         self._elide()
 
+    def refresh_theme(self) -> None:
+        """Repinta ícones e selo após a troca de tema."""
+        self._caption_icon.refresh_theme()
+        self._field_icon.refresh_theme()
+        cor = tone("text") if self.isEnabled() else tone("faint")
+        self._browse_button.setIcon(vector_icon("search", 12, cor))
+        self._clear_button.setIcon(
+            vector_icon("close", 12, tone("subtle"))
+        )
+        self._badge.style().unpolish(self._badge)
+        self._badge.style().polish(self._badge)
+
 
 # ---------------------------------------------------------------------------
-# Área de log
+# Console de log
 # ---------------------------------------------------------------------------
-# Componente funcional com aparência simples: recebe mensagens do backend e
-# aplica cor por nível. O escape de HTML em `append_log` é importante para
-# não interpretar textos do usuário como marcação.
 class LogView(QWidget):
-    """Área de log com cores por nível (info/success/warning/error)."""
+    """Console escuro com cabeçalho e linhas coloridas por nível."""
 
     LEVEL_ICONS = {
         "info": "•",
@@ -666,36 +978,91 @@ class LogView(QWidget):
         "error": "✖",
     }
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        title: str = "CONSOLE DE PROCESSAMENTO LOGÍSTICO • GRUPOSC",
+        meta: str = "UTF-8 • xlsx-engine-v1.1",
+    ) -> None:
         super().__init__(parent)
 
-        self._view = QPlainTextEdit(self)
+        frame = QFrame(self)
+        frame.setObjectName("consoleFrame")
+        frame_layout = QVBoxLayout(frame)
+        frame_layout.setContentsMargins(0, 0, 0, 0)
+        frame_layout.setSpacing(0)
+
+        header = QFrame(frame)
+        header.setObjectName("consoleHeader")
+        header.setFixedHeight(32)
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(12, 0, 12, 0)
+        header_layout.setSpacing(8)
+
+        dots = QHBoxLayout()
+        dots.setSpacing(5)
+        for cor in ("#EF4444", "#F59E0B", "#10B981"):
+            dot = QFrame(header)
+            dot.setFixedSize(8, 8)
+            dot.setStyleSheet(
+                f"background: {cor}; border: none; border-radius: 4px;"
+            )
+            dot.setAccessibleName("")
+            dots.addWidget(dot)
+        header_layout.addLayout(dots)
+
+        self._title = QLabel(title, header)
+        self._title.setObjectName("consoleTitle")
+        self._title.setAccessibleName("Console de log")
+        header_layout.addWidget(self._title)
+        header_layout.addStretch(1)
+
+        self._meta = QLabel(meta, header)
+        self._meta.setObjectName("consoleMeta")
+        header_layout.addWidget(self._meta)
+
+        self._view = QPlainTextEdit(frame)
         self._view.setObjectName("logView")
         self._view.setReadOnly(True)
         self._view.setMaximumBlockCount(800)
-        self._view.setFont(QFont("Consolas", 9))
+        self._view.setFont(QFont("Cascadia Mono", 9))
         self._view.setAccessibleName("Log de mensagens")
         self._view.setAccessibleDescription(
             "Mensagens de status, sucesso, aviso e erro."
         )
+        self._view.setPlaceholderText(
+            "Console pronto • aguardando disparo do operador…"
+        )
+        paleta = self._view.palette()
+        paleta.setColor(
+            QPalette.ColorRole.PlaceholderText, QColor("#8FA5C7")
+        )
+        self._view.setPalette(paleta)
+
+        frame_layout.addWidget(header)
+        frame_layout.addWidget(self._view, 1)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self._view)
+        layout.addWidget(frame)
+        self.setMinimumHeight(150)
 
     def append_log(self, message: str, level: str = "info") -> None:
-        """Adiciona uma linha colorida ao log."""
+        """Adiciona uma linha colorida (hora, nível e mensagem) ao console."""
         color = LOG_COLORS.get(level, LOG_COLORS["info"])
-        icon = self.LEVEL_ICONS.get(level, "•")
+        rotulo = LOG_LABELS.get(level, "INFO")
         safe = (
             str(message)
             .replace("&", "&amp;")
             .replace("<", "&lt;")
             .replace(">", "&gt;")
         )
+        hora = datetime.now().strftime("%H:%M:%S")
         self._view.appendHtml(
-            f'<span style="color:{color};">'
-            f'<b>{icon}</b>&nbsp;&nbsp;{safe}</span>'
+            f'<span style="color:#64748B;">{hora}</span>'
+            f'&nbsp;&nbsp;<span style="color:{color}; font-weight:700;">'
+            f"[{rotulo}]</span>&nbsp;&nbsp;"
+            f'<span style="color:#CBD5E1;">{safe}</span>'
         )
         self._view.verticalScrollBar().setValue(
             self._view.verticalScrollBar().maximum()
@@ -714,14 +1081,12 @@ class LogView(QWidget):
 # ---------------------------------------------------------------------------
 # LED de status
 # ---------------------------------------------------------------------------
-# Aparência com semântica de estado (`idle`, `running`, `ok`, `error`,
-# `cancelled`). As telas dependem de `set_state`/`state`; o pulsar é só visual.
 class StatusLed(QWidget):
-    """Indicador luminoso de status (parado / executando / ok / erro)."""
+    """Ponto luminoso de status (parado / executando / ok / erro)."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setFixedSize(18, 18)
+        self.setFixedSize(12, 12)
         self._state = "idle"
         self._pulse = 0.0
         self.setAccessibleName("Indicador visual de status")
@@ -729,7 +1094,9 @@ class StatusLed(QWidget):
             "Informativo. O texto de status ao lado descreve o estado atual."
         )
         self._animation = QPropertyAnimation(self, b"pulse", self)
-        self._animation.setDuration(900)
+        self._animation.setStartValue(0.0)
+        self._animation.setEndValue(1.0)
+        self._animation.setDuration(1100)
         self._animation.setLoopCount(-1)
         self._animation.setEasingCurve(QEasingCurve.Type.InOutSine)
         self._animation.valueChanged.connect(self._on_pulse)
@@ -737,7 +1104,7 @@ class StatusLed(QWidget):
 
     def set_state(self, state: str) -> None:
         """Define o estado visual: idle, running, ok, error ou cancelled."""
-        self._state = state if state in LED_COLORS else "idle"
+        self._state = state if state in ("idle", "running", "ok", "error", "cancelled") else "idle"
         rotulos = {
             "idle": "Parado",
             "running": "Em execução",
@@ -770,38 +1137,35 @@ class StatusLed(QWidget):
         self.update()
 
     def paintEvent(self, event) -> None:  # noqa: N802 (API Qt)
-        """Desenha o LED com halo e reflexo."""
+        """Desenha o ponto com halo suave."""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        color = QColor(LED_COLORS.get(self._state, LED_COLORS["idle"]))
+        color = QColor(led_color(self._state))
 
-        center = QPointF(9, 9)
-        glow_strength = 0.35 + 0.65 * self._pulse if self._state == "running" else 0.45
-        halo = QRadialGradient(center, 9)
-        halo.setColorAt(0.0, QColor(color.red(), color.green(), color.blue(), 190))
-        halo.setColorAt(0.45, QColor(color.red(), color.green(), color.blue(), 70))
-        halo.setColorAt(1.0, QColor(color.red(), color.green(), color.blue(), 0))
+        centro = QPointF(self.width() / 2, self.height() / 2)
+        if self._state == "running":
+            halo = QRadialGradient(centro, 6)
+            halo.setColorAt(0.0, QColor(color.red(), color.green(), color.blue(), 110))
+            halo.setColorAt(1.0, QColor(color.red(), color.green(), color.blue(), 0))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(halo))
+            painter.drawEllipse(centro, 6, 6)
+
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(halo))
-        painter.drawEllipse(center, 9, 9)
-
         painter.setBrush(QBrush(color))
-        painter.setPen(QPen(QColor(255, 255, 255, 210), 1))
-        painter.drawEllipse(center, 5.4, 5.4)
-
-        painter.setBrush(QBrush(QColor(255, 255, 255, 190)))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(QPointF(7.4, 7.4), 1.7, 1.2)
+        painter.drawEllipse(centro, 3.6, 3.6)
         painter.end()
+
+    def refresh_theme(self) -> None:
+        """Repinta o LED após a troca de tema."""
+        self.update()
 
 
 # ---------------------------------------------------------------------------
 # Ícone do aplicativo
 # ---------------------------------------------------------------------------
-# Puramente estético e desenhado em código (sem .png). Usado na janela e na
-# barra de tarefas; pode ser substituído por outro ícone no redesign.
 def create_app_icon(size: int = 64) -> QIcon:
-    """Desenha o ícone do aplicativo (bolha/onda) com QPainter."""
+    """Desenha o ícone institucional (SC sobre azul-marinho e filete laranja)."""
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.GlobalColor.transparent)
 
@@ -809,53 +1173,35 @@ def create_app_icon(size: int = 64) -> QIcon:
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
     painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
 
-    # Base quadrada arredondada com degradê azul.
+    margem = size * 0.03
     path = QPainterPath()
-    margin = size * 0.04
     path.addRoundedRect(
-        QRectF(margin, margin, size - 2 * margin, size - 2 * margin),
-        size * 0.22,
-        size * 0.22,
+        QRectF(margem, margem, size - 2 * margem, size - 2 * margem),
+        size * 0.18,
+        size * 0.18,
     )
-    gradient = QLinearGradient(0, 0, size, size)
-    gradient.setColorAt(0.0, QColor("#0a4d8c"))
-    gradient.setColorAt(0.5, QColor("#1e90ff"))
-    gradient.setColorAt(1.0, QColor("#63d8c4"))
-    painter.fillPath(path, QBrush(gradient))
-
-    painter.setPen(QPen(QColor(255, 255, 255, 170), max(1.0, size * 0.02)))
+    painter.fillPath(path, QBrush(QColor("#1C2445")))
+    painter.setPen(QPen(QColor("#33A6DE"), max(1.0, size * 0.012)))
     painter.drawPath(path)
 
-    # Bolha principal.
-    bubble_center = QPointF(size * 0.42, size * 0.44)
-    bubble_radius = size * 0.24
-    body = QRadialGradient(
-        QPointF(bubble_center.x() - bubble_radius * 0.3, bubble_center.y() - bubble_radius * 0.35),
-        bubble_radius * 1.3,
+    # Filete laranja superior.
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor("#FF9F00"))
+    painter.drawRoundedRect(
+        QRectF(size * 0.16, size * 0.12, size * 0.68, size * 0.055),
+        size * 0.03,
+        size * 0.03,
     )
-    body.setColorAt(0.0, QColor(255, 255, 255, 245))
-    body.setColorAt(0.6, QColor(210, 245, 255, 165))
-    body.setColorAt(1.0, QColor(140, 220, 255, 70))
-    painter.setPen(QPen(QColor(255, 255, 255, 220), max(1.0, size * 0.018)))
-    painter.setBrush(QBrush(body))
-    painter.drawEllipse(bubble_center, bubble_radius, bubble_radius)
 
-    # Onda na base.
-    wave = QPainterPath()
-    wave.moveTo(size * 0.16, size * 0.76)
-    wave.cubicTo(
-        size * 0.32, size * 0.62,
-        size * 0.44, size * 0.90,
-        size * 0.60, size * 0.76,
+    # Monograma SC.
+    fonte = QFont(APP_FONT, max(6, int(size * 0.30)))
+    fonte.setWeight(QFont.Weight.Bold)
+    painter.setFont(fonte)
+    painter.setPen(QColor("#33A6DE"))
+    painter.drawText(
+        QRectF(0, size * 0.30, size, size * 0.52),
+        int(Qt.AlignmentFlag.AlignCenter),
+        "SC",
     )
-    wave.cubicTo(
-        size * 0.72, size * 0.66,
-        size * 0.80, size * 0.82,
-        size * 0.88, size * 0.74,
-    )
-    painter.setPen(QPen(QColor(255, 255, 255, 210), max(1.5, size * 0.035)))
-    painter.setBrush(Qt.BrushStyle.NoBrush)
-    painter.drawPath(wave)
-
     painter.end()
     return QIcon(pixmap)

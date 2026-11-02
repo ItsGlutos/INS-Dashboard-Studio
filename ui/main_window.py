@@ -1,16 +1,14 @@
 """Janela principal do INS Dashboard Studio.
 
-Reúne a configuração do trabalho (tipo de relatório, arquivo de origem,
-template e pasta de saída), a área de execução (progresso, log e resumo) e
-o controle do backend, que roda sempre em uma ``QThread`` separada.
+A janela segue o manual institucional GrupoSC: barra superior azul-marinho,
+faixa de contexto, dois cartões de conteúdo (Configuração e Execução), banner
+informativo e rodapé normativo.  O tema claro/escuro é alternado no cabeçalho.
 
 .. note::
-   **O layout será refeito.** Toda a hierarquia visual é montada em
-   ``_build_*``; trocar a aparência significa reescrever esses métodos
-   mantendo os mesmos atributos (``self._segmented``, ``self._source_selector``
-   etc.), pois a lógica de execução e persistência os referencia diretamente.
-   Não mova para a camada visual os sinais/slots, o controle de
-   ``_running``/``_cancel_flag`` nem a persistência via ``QSettings``.
+   Toda a lógica de execução, cancelamento, persistência e callbacks de thread
+   é a mesma da versão anterior.  Os atributos ``self._*`` referenciados por
+   essa lógica (``_segmented``, ``_source_selector``, ``_led``, ``_progress``,
+   ``_log`` etc.) são mantidos.  A camada visual fica em ``_build_*``.
 """
 
 from __future__ import annotations
@@ -23,7 +21,9 @@ from pathlib import Path
 from PyQt6.QtCore import QSettings, Qt, QThread
 from PyQt6.QtGui import QGuiApplication
 from PyQt6.QtWidgets import (
+    QApplication,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -39,14 +39,20 @@ from PyQt6.QtWidgets import (
 from backend import JobConfig, JobError, JobResult, get_report_type
 
 from .envios_tab import EnviosTab
+from .theme import build_stylesheet, current_theme, is_dark, set_theme
 from .widgets import (
+    AccentCard,
+    Badge,
     FileSelector,
-    GlassPanel,
     GlossyButton,
+    IconTile,
+    IconWidget,
     LogView,
+    NavButton,
     SegmentedSelector,
-    StatusLed,
     SkyBackground,
+    StatusLed,
+    ThemeToggle,
     create_app_icon,
 )
 
@@ -57,6 +63,66 @@ _SETTING_REPORT_TYPE = "report_type"
 _SETTING_SOURCE = "source_file"
 _SETTING_TEMPLATE = "template_file"
 _SETTING_OUTPUT = "output_dir"
+_SETTING_THEME = "ui/theme"
+
+_MONO_META = "Motor: OfficeOpenXML / GrupoSC Kernel"
+
+# Rótulo exibido na interface para o critério de agrupamento. O motorista
+# continua sendo agrupado internamente por ``Apelido``; este texto é apenas
+# de apresentação ao usuário.
+_GROUP_DISPLAY = "Transportador"
+
+
+class _ResponsiveColumns(QWidget):
+    """Duas colunas que empilham em janelas estreitas.
+
+    Puramente de layout: os cartões continuam os mesmos widgets, com os mesmos
+    sinais e atributos.  Em larguras menores que ``breakpoint`` o painel de
+    execução desce para baixo da configuração.
+    """
+
+    def __init__(
+        self,
+        left: QWidget,
+        right: QWidget,
+        parent: QWidget | None = None,
+        breakpoint: int = 1000,
+        spacing: int = 24,
+    ) -> None:
+        super().__init__(parent)
+        self._left = left
+        self._right = right
+        self._breakpoint = breakpoint
+        self._narrow: bool | None = None
+
+        self._grid = QGridLayout(self)
+        self._grid.setContentsMargins(0, 0, 0, 0)
+        self._grid.setHorizontalSpacing(spacing)
+        self._grid.setVerticalSpacing(spacing)
+        self._grid.setColumnStretch(0, 5)
+        self._grid.setColumnStretch(1, 7)
+        self._apply(False)
+
+    def _apply(self, narrow: bool) -> None:
+        if self._narrow == narrow:
+            return
+        self._narrow = narrow
+        self._grid.removeWidget(self._left)
+        self._grid.removeWidget(self._right)
+        if narrow:
+            self._grid.setColumnStretch(0, 1)
+            self._grid.setColumnStretch(1, 0)
+            self._grid.addWidget(self._left, 0, 0, 1, 2)
+            self._grid.addWidget(self._right, 1, 0, 1, 2)
+        else:
+            self._grid.setColumnStretch(0, 5)
+            self._grid.setColumnStretch(1, 7)
+            self._grid.addWidget(self._left, 0, 0)
+            self._grid.addWidget(self._right, 0, 1)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 (API Qt)
+        super().resizeEvent(event)
+        self._apply(self.width() < self._breakpoint)
 
 
 class MainWindow(QMainWindow):
@@ -70,11 +136,11 @@ class MainWindow(QMainWindow):
         screen = QGuiApplication.primaryScreen()
         if screen is not None:
             disponivel = screen.availableGeometry()
-            largura = min(1180, max(860, disponivel.width() - 80))
-            altura = min(860, max(480, disponivel.height() - 80))
+            largura = min(1280, max(860, disponivel.width() - 80))
+            altura = min(880, max(480, disponivel.height() - 80))
             self.resize(largura, altura)
         else:
-            self.resize(1180, 860)
+            self.resize(1280, 880)
 
         self._settings = QSettings("INS", "INS Dashboard Studio")
         # Estado de execução: _running bloqueia a UI, _cancel_flag é lida pela
@@ -88,40 +154,84 @@ class MainWindow(QMainWindow):
         self._total_groups = 0
         self._close_after_cancel = False
 
+        self._restore_theme()
         self._build_ui()
         self._restore_settings()
         self._update_report_type(self._segmented.current, save=False)
         self._set_running(False)
+        self._on_tab_changed(0)
+        self._apply_theme(current_theme())
+
+    # ------------------------------------------------------------------
+    # Tema
+    # ------------------------------------------------------------------
+    def _restore_theme(self) -> None:
+        """Restaura o tema salvo antes de montar os widgets."""
+        tema = str(self._settings.value(_SETTING_THEME, "light") or "light")
+        if tema not in ("light", "dark"):
+            tema = "light"
+        set_theme(tema)
+
+    def _apply_theme(self, theme: str) -> None:
+        """Reaplica o QSS global e repinta todos os componentes."""
+        set_theme(theme)
+        app = QApplication.instance()
+        if app is not None:
+            app.setStyleSheet(build_stylesheet(theme))
+        self._theme_toggle.blockSignals(True)
+        self._theme_toggle.setChecked(theme == "dark")
+        self._theme_toggle.blockSignals(False)
+        self._theme_toggle.refresh_theme()
+        self.setWindowIcon(create_app_icon())
+        for widget in self.findChildren(QWidget):
+            refresh = getattr(widget, "refresh_theme", None)
+            if callable(refresh):
+                refresh()
+        self._on_tab_changed(self._tabs.currentIndex())
+        self._settings.setValue(_SETTING_THEME, theme)
+
+    def _on_theme_toggled(self, escuro: bool) -> None:
+        """Alterna entre o tema claro e o escuro."""
+        self._apply_theme("dark" if escuro else "light")
 
     # ------------------------------------------------------------------
     # Construção da interface
     # ------------------------------------------------------------------
     def _build_ui(self) -> None:
-        """Monta a hierarquia de widgets da janela.
+        """Monta cabeçalho, faixa de contexto, abas e rodapé.
 
-        Estrutura: cabeçalho fixo -> QTabWidget com as abas "Geração de
-        dashboards" e "Envios de INS" -> rodapé. A aba de geração usa um
-        QScrollArea para continuar utilizável em telas baixas.
+        Estrutura: cabeçalho fixo -> faixa de contexto + ``QTabWidget`` (com a
+        barra nativa oculta, substituída pela navegação do cabeçalho) -> rodapé.
+        As abas usam ``QScrollArea`` para continuar utilizáveis em telas baixas.
         """
         background = SkyBackground(self)
         self.setCentralWidget(background)
 
         outer = QVBoxLayout(background)
-        outer.setContentsMargins(16, 14, 16, 14)
-        outer.setSpacing(12)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
 
         outer.addWidget(self._build_header())
 
-        self._tabs = QTabWidget(background)
+        content = QWidget(background)
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(24, 14, 24, 0)
+        content_layout.setSpacing(12)
+        content_layout.addWidget(self._build_ribbon())
+
+        self._tabs = QTabWidget(content)
         self._tabs.setObjectName("mainTabs")
         self._tabs.setDocumentMode(True)
+        self._tabs.tabBar().hide()
 
         geracao = QWidget(self._tabs)
-        geracao_layout = QHBoxLayout(geracao)
+        geracao.setObjectName("scrollContent")
+        geracao_layout = QVBoxLayout(geracao)
         geracao_layout.setContentsMargins(0, 0, 0, 0)
-        geracao_layout.setSpacing(12)
-        geracao_layout.addWidget(self._build_config_panel(), 0)
-        geracao_layout.addWidget(self._build_run_panel(), 1)
+        geracao_layout.setSpacing(16)
+        geracao_layout.addWidget(self._build_generation_page())
+        geracao_layout.addWidget(self._build_info_banner())
+        geracao_layout.addStretch(1)
 
         geracao_scroll = QScrollArea(self._tabs)
         geracao_scroll.setObjectName("contentScroll")
@@ -141,174 +251,331 @@ class MainWindow(QMainWindow):
         self._envios_tab = EnviosTab(self._tabs)
         self._tabs.addTab(self._envios_tab, "Envios de INS")
 
-        outer.addWidget(self._tabs, 1)
+        self._tabs.currentChanged.connect(self._on_tab_changed)
+        content_layout.addWidget(self._tabs, 1)
+        outer.addWidget(content, 1)
         outer.addWidget(self._build_footer())
 
     def _build_header(self) -> QWidget:
-        """Cria o cabeçalho com o ícone e o título do aplicativo."""
-        panel = GlassPanel()
-        # Vidro escuro: garante contraste para o título branco.
-        panel.setObjectName("headerPanel")
-        panel.setFixedHeight(84)
+        """Cria a barra institucional: marca, produto, navegação e tema."""
+        header = QFrame(self)
+        header.setObjectName("headerPanel")
+        header.setFixedHeight(80)
 
-        layout = QHBoxLayout(panel)
-        layout.setContentsMargins(16, 10, 18, 10)
-        layout.setSpacing(14)
+        layout = QHBoxLayout(header)
+        layout.setContentsMargins(20, 0, 20, 0)
+        layout.setSpacing(12)
 
-        icon_label = QLabel(panel)
-        icon_label.setPixmap(
-            create_app_icon(64).pixmap(56, 56)
+        brand = QLabel("GrupoSC", header)
+        brand.setObjectName("brandCard")
+        brand.setFixedHeight(40)
+        brand.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        brand.setAccessibleName("GrupoSC")
+        layout.addWidget(brand)
+
+        divider = QFrame(header)
+        divider.setObjectName("verticalDivider")
+        divider.setFixedSize(1, 30)
+        layout.addWidget(divider)
+
+        product = QVBoxLayout()
+        product.setSpacing(1)
+        product_name = QLabel("INS Dashboard Studio", header)
+        product_name.setObjectName("productName")
+        self._product_meta = QLabel(
+            "Qualidade • Transporte & Segurança", header
         )
-        icon_label.setFixedSize(58, 58)
-        icon_label.setScaledContents(False)
-        layout.addWidget(icon_label)
+        self._product_meta.setObjectName("productMeta")
+        product.addWidget(product_name)
+        product.addWidget(self._product_meta)
+        layout.addLayout(product)
 
-        texts = QVBoxLayout()
-        texts.setSpacing(2)
+        layout.addStretch(1)
 
-        title = QLabel("INS Dashboard Studio", panel)
-        title.setObjectName("appTitle")
-        subtitle = QLabel(
-            "Geração de dashboards INS e envio dos relatórios por transportadora",
-            panel,
-        )
-        subtitle.setObjectName("appSubtitle")
+        nav = QHBoxLayout()
+        nav.setSpacing(4)
+        self._nav_buttons: list[NavButton] = []
+        for indice, (texto, icone) in enumerate(
+            (
+                ("Geração de Dashboards", "grid"),
+                ("Envios de INS", "mail"),
+            )
+        ):
+            botao = NavButton(texto, icone, header)
+            botao.clicked.connect(
+                lambda _=False, i=indice: self._tabs.setCurrentIndex(i)
+            )
+            nav.addWidget(botao)
+            self._nav_buttons.append(botao)
+        layout.addLayout(nav)
 
-        texts.addWidget(title)
-        texts.addWidget(subtitle)
-        layout.addLayout(texts, 1)
+        layout.addStretch(1)
 
-        chip = QLabel("Frutiger Aero", panel)
-        chip.setObjectName("chip")
-        chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(chip)
+        self._theme_toggle = ThemeToggle(header)
+        self._theme_toggle.blockSignals(True)
+        self._theme_toggle.setChecked(is_dark())
+        self._theme_toggle.blockSignals(False)
+        self._theme_toggle.refresh_theme()
+        self._theme_toggle.toggled.connect(self._on_theme_toggled)
+        layout.addWidget(self._theme_toggle)
 
-        return panel
+        return header
 
-    def _build_config_panel(self) -> QWidget:
-        """Cria o painel de configuração (tipo de relatório e caminhos).
+    def _build_ribbon(self) -> QWidget:
+        """Cria a faixa de contexto com o título da área ativa."""
+        ribbon = QFrame(self)
+        ribbon.setObjectName("ribbonBar")
 
-        Os widgets guardados em ``self._*`` não são decoração: cada um é lido
-        por ``_build_config``/``_save_settings``/``_set_running``. Se o layout
-        mudar, mantenha esses atributos.
-        """
-        panel = GlassPanel()
-        panel.setFixedWidth(430)
-
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(18, 16, 18, 16)
+        layout = QHBoxLayout(ribbon)
+        layout.setContentsMargins(14, 8, 14, 8)
         layout.setSpacing(10)
 
-        title = QLabel("Configuração", panel)
-        title.setObjectName("sectionTitle")
-        layout.addWidget(title)
+        self._ribbon_icon = IconWidget("grid", 16, "accent", ribbon)
+        self._ribbon_title = QLabel("Geração de Dashboards INS", ribbon)
+        self._ribbon_title.setObjectName("ribbonTitle")
+
+        layout.addWidget(self._ribbon_icon)
+        layout.addWidget(self._ribbon_title)
+        layout.addStretch(1)
+        return ribbon
+
+    def _build_generation_page(self) -> QWidget:
+        """Cria a página com os cartões de configuração e execução."""
+        page = QWidget(self)
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(16)
+
+        self._columns = _ResponsiveColumns(
+            self._build_config_panel(),
+            self._build_run_panel(),
+            page,
+        )
+        layout.addWidget(self._columns)
+        return page
+
+    def _build_config_panel(self) -> QWidget:
+        """Cria o cartão de configuração (tipo de relatório e caminhos).
+
+        Os widgets guardados em ``self._*`` são lidos por
+        ``_build_config``/``_save_settings``/``_set_running``.
+        """
+        card = AccentCard(accent="orange")
+        card.setMinimumWidth(360)
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(24, 18, 24, 18)
+        layout.setSpacing(0)
+
+        eyebrow_row = QHBoxLayout()
+        eyebrow_row.setSpacing(8)
+        eyebrow = QLabel("PARÂMETROS DE ENTRADA", card)
+        eyebrow.setObjectName("cardEyebrow")
+        eyebrow_row.addWidget(eyebrow)
+        eyebrow_row.addStretch(1)
+        layout.addLayout(eyebrow_row)
+
+        title_row = QHBoxLayout()
+        title_row.setSpacing(9)
+        title_icon = IconWidget("sliders", 20, "accent", card)
+        title = QLabel("Configuração", card)
+        title.setObjectName("cardTitle")
+        title_row.addWidget(title_icon)
+        title_row.addWidget(title)
+        title_row.addStretch(1)
+        layout.addSpacing(6)
+        layout.addLayout(title_row)
 
         hint = QLabel(
-            "Escolha o tipo de relatório e os arquivos utilizados na geração.",
-            panel,
+            "Defina o critério de agrupamento e os caminhos de origem e "
+            "gravação do lote.",
+            card,
         )
-        hint.setObjectName("sectionHint")
+        hint.setObjectName("descriptionText")
         hint.setWordWrap(True)
+        layout.addSpacing(4)
         layout.addWidget(hint)
 
-        # Seletor segmentado Motorista | Transportador.
+        layout.addSpacing(14)
+        divider = QFrame(card)
+        divider.setObjectName("divider")
+        layout.addWidget(divider)
+        layout.addSpacing(16)
+
+        group_label = QLabel("AGRUPAMENTO DO LOTE", card)
+        group_label.setObjectName("fieldCaption")
+        layout.addWidget(group_label)
+        layout.addSpacing(8)
+
         self._segmented = SegmentedSelector(
             [("motorista", "Motorista"), ("transportador", "Transportador")],
-            parent=panel,
+            parent=card,
         )
         self._segmented.changed.connect(self._update_report_type)
         layout.addWidget(self._segmented)
+        layout.addSpacing(14)
 
-        self._description = QLabel("", panel)
+        info_box = QFrame(card)
+        info_box.setObjectName("infoBox")
+        info_layout = QVBoxLayout(info_box)
+        info_layout.setContentsMargins(14, 12, 14, 10)
+        info_layout.setSpacing(8)
+
+        self._description = QLabel("", info_box)
         self._description.setObjectName("descriptionText")
         self._description.setWordWrap(True)
-        layout.addWidget(self._description)
+        info_layout.addWidget(self._description)
+
+        info_divider = QFrame(info_box)
+        info_divider.setObjectName("divider")
+        info_layout.addWidget(info_divider)
 
         group_row = QHBoxLayout()
         group_row.setSpacing(8)
-        group_caption = QLabel("Agrupamento por:", panel)
+        group_caption = QLabel("AGRUPAMENTO ATIVO:", info_box)
         group_caption.setObjectName("fieldCaption")
-        self._group_chip = QLabel("", panel)
-        self._group_chip.setObjectName("chip")
+        self._group_chip = QLabel("", info_box)
+        self._group_chip.setObjectName("activeChip")
         group_row.addWidget(group_caption)
         group_row.addWidget(self._group_chip)
         group_row.addStretch(1)
-        layout.addLayout(group_row)
+        info_layout.addLayout(group_row)
+        layout.addWidget(info_box)
 
-        separator = QFrame(panel)
-        separator.setFrameShape(QFrame.Shape.HLine)
-        separator.setFixedHeight(1)
-        separator.setStyleSheet(
-            "background: rgba(255, 255, 255, 220); border: none;"
-        )
-        layout.addWidget(separator)
+        layout.addSpacing(14)
 
         self._source_selector = FileSelector(
             "Arquivo do relatório (.xlsx)",
-            button_text="Procurar…",
+            button_text="Procurar...",
             mode="file",
             dialog_title="Selecionar o relatório INS",
             file_filter="Planilhas do Excel (*.xlsx *.xlsm)",
-            parent=panel,
+            parent=card,
         )
-        layout.addWidget(self._source_selector)
-
+        self._source_selector.selectionChanged.connect(
+            self._refresh_structure_badge
+        )
         self._template_selector = FileSelector(
             "Template do dashboard (.xlsx)",
-            button_text="Procurar…",
+            button_text="Procurar...",
             mode="file",
             dialog_title="Selecionar o template do dashboard",
             file_filter="Templates do Excel (*.xlsx *.xlsm *.xltx *.xltm)",
-            parent=panel,
+            parent=card,
         )
-        layout.addWidget(self._template_selector)
-
         self._output_selector = FileSelector(
             "Pasta de saída dos dashboards",
-            button_text="Escolher…",
+            button_text="Escolher...",
             mode="directory",
             dialog_title="Selecionar a pasta de saída",
-            parent=panel,
+            parent=card,
         )
-        layout.addWidget(self._output_selector)
+        for seletor in (
+            self._source_selector,
+            self._template_selector,
+            self._output_selector,
+        ):
+            layout.addWidget(seletor)
+            layout.addSpacing(10)
+
+        quick = QFrame(card)
+        quick.setObjectName("quickBox")
+        quick_layout = QHBoxLayout(quick)
+        quick_layout.setContentsMargins(12, 10, 12, 10)
+        quick_layout.setSpacing(12)
+
+        quick_icon = IconTile("layers", 36, "accent", radius=4, parent=quick)
+        quick_text = QVBoxLayout()
+        quick_text.setSpacing(1)
+        quick_title = QLabel("Estrutura de Origem Mapeada", quick)
+        quick_title.setObjectName("quickTitle")
+        self._structure_meta = QLabel(
+            f"Aba INS • agrupamento por {_GROUP_DISPLAY}", quick
+        )
+        self._structure_meta.setObjectName("quickMeta")
+        quick_text.addWidget(quick_title)
+        quick_text.addWidget(self._structure_meta)
+
+        self._structure_badge = Badge("AGUARDANDO", "idle")
+        self._structure_badge.setAccessibleName(
+            "Situação da estrutura de origem"
+        )
+        quick_layout.addWidget(quick_icon)
+        quick_layout.addLayout(quick_text, 1)
+        quick_layout.addWidget(self._structure_badge)
+        layout.addWidget(quick)
 
         layout.addStretch(1)
-        return panel
+        return card
 
     def _build_run_panel(self) -> QWidget:
-        """Cria o painel de execução (progresso, log e botões).
+        """Cria o cartão de execução (progresso, console e ações).
 
-        Além da aparência, cada controle é o destino dos callbacks de
-        ``JobWorker`` (progresso, log, conclusão, falha e cancelamento).
+        Cada controle é o destino dos callbacks de ``JobWorker`` (progresso,
+        log, conclusão, falha e cancelamento).
         """
-        panel = GlassPanel()
+        card = AccentCard(accent="accent")
 
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(18, 16, 18, 16)
-        layout.setSpacing(10)
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(24, 20, 24, 18)
+        layout.setSpacing(12)
 
         header_row = QHBoxLayout()
         header_row.setSpacing(10)
+        play_icon = IconTile("play", 34, "accent", radius=4, parent=card)
+        header_row.addWidget(play_icon)
 
-        title = QLabel("Execução", panel)
-        title.setObjectName("sectionTitle")
-        header_row.addWidget(title)
-
-        self._led = StatusLed(panel)
-        header_row.addWidget(self._led)
-
-        self._status_label = QLabel("Pronto para gerar", panel)
+        title_box = QVBoxLayout()
+        title_box.setSpacing(1)
+        title = QLabel("Execução", card)
+        title.setObjectName("cardTitle")
+        status_row = QHBoxLayout()
+        status_row.setSpacing(6)
+        self._led = StatusLed(card)
+        self._status_label = QLabel("Pronto para gerar", card)
         self._status_label.setObjectName("statusText")
-        header_row.addWidget(self._status_label, 1)
+        self._status_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+        )
+        status_row.addWidget(self._led)
+        status_row.addWidget(self._status_label, 1)
+        title_box.addWidget(title)
+        title_box.addLayout(status_row)
+        header_row.addLayout(title_box, 1)
 
-        clear_log_button = GlossyButton("Limpar log", panel)
+        clear_log_button = GlossyButton(
+            "Limpar log",
+            card,
+            variant="glossButton",
+            icon_name="trash",
+            icon_role="muted",
+            icon_size=13,
+        )
         clear_log_button.setObjectName("miniButton")
-        clear_log_button.setFixedHeight(26)
+        clear_log_button.setFixedHeight(30)
         clear_log_button.clicked.connect(self._clear_log)
         header_row.addWidget(clear_log_button)
         layout.addLayout(header_row)
 
-        self._progress = QProgressBar(panel)
+        layout.addSpacing(2)
+        divider = QFrame(card)
+        divider.setObjectName("divider")
+        layout.addWidget(divider)
+        layout.addSpacing(2)
+
+        progress_head = QHBoxLayout()
+        progress_head.setSpacing(8)
+        progress_caption = QLabel("PROGRESSO DO LOTE", card)
+        progress_caption.setObjectName("fieldCaption")
+        self._counter_label = QLabel("0 de 0", card)
+        self._counter_label.setObjectName("statusText")
+        self._counter_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        progress_head.addWidget(progress_caption)
+        progress_head.addStretch(1)
+        progress_head.addWidget(self._counter_label)
+        layout.addLayout(progress_head)
+
+        self._progress = QProgressBar(card)
         self._progress.setRange(0, 100)
         self._progress.setValue(0)
         self._progress.setFormat("%p%")
@@ -317,77 +584,147 @@ class MainWindow(QMainWindow):
 
         progress_row = QHBoxLayout()
         progress_row.setSpacing(10)
-
-        self._counter_label = QLabel("0 de 0", panel)
-        self._counter_label.setObjectName("groupText")
-        progress_row.addWidget(self._counter_label)
-
-        self._group_label = QLabel("", panel)
+        self._group_label = QLabel("Fila ociosa • Aguardando operador", card)
         self._group_label.setObjectName("groupText")
-        self._group_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        engine_label = QLabel(_MONO_META, card)
+        engine_label.setObjectName("groupText")
+        engine_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         progress_row.addWidget(self._group_label, 1)
+        progress_row.addWidget(engine_label)
         layout.addLayout(progress_row)
 
-        self._summary_label = QLabel("", panel)
-        self._summary_label.setObjectName("summaryText")
-        self._summary_label.setWordWrap(True)
-        layout.addWidget(self._summary_label)
-
-        self._log = LogView(panel)
+        self._log = LogView(card)
         self._log.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
         layout.addWidget(self._log, 1)
 
-        buttons = QHBoxLayout()
-        buttons.setSpacing(10)
+        self._summary_label = QLabel("", card)
+        self._summary_label.setObjectName("summaryText")
+        self._summary_label.setWordWrap(True)
+        layout.addWidget(self._summary_label)
 
-        self._open_folder_button = GlossyButton("Abrir pasta de saída", panel)
-        self._open_folder_button.setObjectName("miniButton")
+        action_divider = QFrame(card)
+        action_divider.setObjectName("divider")
+        layout.addWidget(action_divider)
+
+        actions = QHBoxLayout()
+        actions.setSpacing(10)
+        self._open_folder_button = GlossyButton(
+            "Abrir pasta de saída",
+            card,
+            variant="glossButton",
+            icon_name="folder",
+            icon_role="accent",
+            icon_size=15,
+        )
         self._open_folder_button.setEnabled(False)
         self._open_folder_button.clicked.connect(self._open_output_folder)
-        buttons.addWidget(self._open_folder_button)
+        actions.addWidget(self._open_folder_button)
+        actions.addStretch(1)
 
-        buttons.addStretch(1)
-
-        self._cancel_button = GlossyButton("Cancelar", panel)
+        self._cancel_button = GlossyButton("Cancelar", card)
         self._cancel_button.setObjectName("dangerButton")
         self._cancel_button.setEnabled(False)
         self._cancel_button.clicked.connect(self._cancel_job)
-        buttons.addWidget(self._cancel_button)
+        actions.addWidget(self._cancel_button)
 
-        self._generate_button = GlossyButton("Gerar dashboards", panel)
-        self._generate_button.setObjectName("primaryButton")
+        self._generate_button = GlossyButton(
+            "Gerar dashboards",
+            card,
+            variant="primaryButton",
+            icon_name="bolt",
+            icon_role="navy",
+            icon_size=16,
+        )
         self._generate_button.clicked.connect(self._start_job)
-        buttons.addWidget(self._generate_button)
+        actions.addWidget(self._generate_button)
+        layout.addLayout(actions)
 
-        layout.addLayout(buttons)
-        return panel
+        return card
 
-    def _build_footer(self) -> QWidget:
-        """Cria a barra inferior com atalhos e dicas de uso (só informativa)."""
-        footer = QFrame(self)
-        footer.setObjectName("glassPanel")
-        footer.setFixedHeight(34)
-
-        layout = QHBoxLayout(footer)
-        layout.setContentsMargins(14, 2, 14, 2)
+    def _build_info_banner(self) -> QWidget:
+        """Cria o banner informativo com os protocolos disponíveis."""
+        banner = QFrame(self)
+        banner.setObjectName("infoBanner")
+        layout = QHBoxLayout(banner)
+        layout.setContentsMargins(16, 10, 16, 10)
         layout.setSpacing(12)
 
-        left = QLabel(
-            "Arquivos e pastas são sempre escolhidos por você — nada é fixo no aplicativo.",
-            footer,
+        icon = IconTile(
+            "shield",
+            34,
+            "warn_bg",
+            "warn_border",
+            icon_role="warn_text",
+            radius=4,
+            parent=banner,
         )
-        left.setObjectName("sectionHint")
+        layout.addWidget(icon)
+
+        texto = QLabel(
+            "Arquivos e pastas são sempre escolhidos por você — nada é gravado "
+            "de forma fixa ou rígida no aplicativo.",
+            banner,
+        )
+        texto.setObjectName("sectionHint")
+        texto.setWordWrap(True)
+        layout.addWidget(texto, 1)
+
+        excel = QLabel("• Excel para gerar dashboards", banner)
+        excel.setObjectName("connectionChip")
+        excel.setAccessibleName("Protocolo Excel disponível para geração")
+        layout.addWidget(excel)
+
+        outlook = QLabel("• Outlook para os envios", banner)
+        outlook.setObjectName("connectionChip")
+        outlook.setProperty("variant", "info")
+        outlook.setAccessibleName("Protocolo Outlook disponível para envios")
+        layout.addWidget(outlook)
+        return banner
+
+    def _build_footer(self) -> QWidget:
+        """Cria o rodapé normativo institucional."""
+        footer = QFrame(self)
+        footer.setObjectName("footerBar")
+        footer.setFixedHeight(52)
+
+        layout = QHBoxLayout(footer)
+        layout.setContentsMargins(24, 0, 24, 0)
+        layout.setSpacing(10)
+
+        left = QLabel(
+            "GrupoSC • Qualidade • Transporte & Segurança", footer
+        )
+        left.setObjectName("footerText")
         layout.addWidget(left)
         layout.addStretch(1)
 
-        right = QLabel(
-            "Excel para gerar dashboards · Outlook para os envios", footer
+        self._footer_right = QLabel(
+            "Conformidade WCAG 2.2 AA / LGPD   •   "
+            "INS Dashboard Studio • Núcleo de Logística Farmacêutica",
+            footer,
         )
-        right.setObjectName("sectionHint")
-        layout.addWidget(right)
+        self._footer_right.setObjectName("footerFaint")
+        layout.addWidget(self._footer_right)
         return footer
+
+    # ------------------------------------------------------------------
+    # Navegação
+    # ------------------------------------------------------------------
+    def _on_tab_changed(self, index: int) -> None:
+        """Sincroniza a navegação, a faixa de contexto e os ícones."""
+        if not hasattr(self, "_nav_buttons"):
+            return
+        for i, botao in enumerate(self._nav_buttons):
+            botao.set_active(i == index)
+        if index == 0:
+            self._ribbon_icon.set_icon("grid")
+            self._ribbon_title.setText("Geração de Dashboards INS")
+        else:
+            self._ribbon_icon.set_icon("mail")
+            self._ribbon_title.setText("Envios de INS por Transportadora")
+        self._ribbon_icon.set_role("accent")
 
     # ------------------------------------------------------------------
     # Tipo de relatório
@@ -400,12 +737,22 @@ class MainWindow(QMainWindow):
             return
 
         self._description.setText(report.description)
-        self._group_chip.setText(report.group_column)
-        self._group_chip.setToolTip(
-            f"Coluna de agrupamento do relatório: {report.group_column}"
+        self._group_chip.setText(_GROUP_DISPLAY)
+        self._group_chip.setToolTip("Agrupamento por transportador")
+        self._structure_meta.setText(
+            f"Aba INS • agrupamento por {_GROUP_DISPLAY}"
         )
         if save:
             self._settings.setValue(_SETTING_REPORT_TYPE, report.key)
+
+    def _refresh_structure_badge(self, *_: object) -> None:
+        """Indica visualmente se há arquivo de origem selecionado."""
+        if not hasattr(self, "_structure_badge"):
+            return
+        if self._source_selector.path:
+            self._structure_badge.set_status("PRONTO", "ok")
+        else:
+            self._structure_badge.set_status("AGUARDANDO", "idle")
 
     # ------------------------------------------------------------------
     # Persistência de preferências
@@ -430,6 +777,7 @@ class MainWindow(QMainWindow):
             self._output_selector.set_path(output)
             self._output_dir = Path(output)
             self._open_folder_button.setEnabled(Path(output).exists())
+        self._refresh_structure_badge()
 
     def _save_settings(self) -> None:
         """Grava as preferências atuais."""
@@ -495,7 +843,7 @@ class MainWindow(QMainWindow):
         self._cancel_flag = threading.Event()
         self._total_groups = 0
         self._summary_label.clear()
-        self._group_label.clear()
+        self._group_label.setText("Preparando fila de grupos…")
         self._progress.setRange(0, 0)
         self._progress.setValue(0)
         self._counter_label.setText("0 de 0")
@@ -573,7 +921,7 @@ class MainWindow(QMainWindow):
             f"{resultado.dashboard_count} de "
             f"{max(self._total_groups, resultado.dashboard_count)}"
         )
-        self._group_label.clear()
+        self._group_label.setText("Fila concluída • Operador liberado")
 
         resumo = (
             f"{resultado.dashboard_count} dashboard(s) gerado(s) · "
@@ -610,7 +958,7 @@ class MainWindow(QMainWindow):
         self._progress.setRange(0, 100)
         self._progress.setValue(0)
         self._counter_label.setText("Cancelado")
-        self._group_label.clear()
+        self._group_label.setText("Fila interrompida • Aguardando operador")
         self._log.append_log(
             "Geração cancelada pelo usuário. Os dashboards já salvos "
             "foram mantidos.",
@@ -637,9 +985,7 @@ class MainWindow(QMainWindow):
     def _set_running(self, running: bool) -> None:
         """Habilita/desabilita os controles conforme o estado da execução.
 
-        Ponto único de bloqueio da interface: se novos controles forem criados
-        no redesign e precisarem ser bloqueados durante a geração, adicione-os
-        aqui (e não espalhe chamadas de setEnabled pelas telas).
+        Ponto único de bloqueio da interface.
         """
         self._running = running
         self._generate_button.setEnabled(not running)
@@ -705,6 +1051,27 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Eventos
     # ------------------------------------------------------------------
+    def resizeEvent(self, event) -> None:  # noqa: N802 (API Qt)
+        """Adapta o cabeçalho e o rodapé em janelas estreitas."""
+        super().resizeEvent(event)
+        largura = self.width()
+        self._product_meta.setVisible(largura >= 1040)
+        if hasattr(self, "_footer_right"):
+            self._footer_right.setVisible(largura >= 1040)
+        if hasattr(self, "_nav_buttons"):
+            if largura < 940:
+                for botao, curto in zip(
+                    self._nav_buttons,
+                    ("Geração", "Envios"),
+                ):
+                    botao.setText(curto)
+            else:
+                for botao, longo in zip(
+                    self._nav_buttons,
+                    ("Geração de Dashboards", "Envios de INS"),
+                ):
+                    botao.setText(longo)
+
     def closeEvent(self, event) -> None:  # noqa: N802 (API Qt)
         """Fecha a janela com segurança durante uma geração em andamento."""
         if self._envios_tab.is_running:

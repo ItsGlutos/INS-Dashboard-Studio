@@ -144,39 +144,52 @@ enviar_plano(plano, chaves, sender_factory=None,
 - `Espaço`/`Enter` alternam a transportadora selecionada na tabela.
 - Janela mínima de 860×480, dimensionada pela área útil da tela; conteúdo das
   abas e prévia do diálogo em `QScrollArea` para não cortar em telas baixas.
-- Cores de texto e status com contraste legível sobre os painéis de vidro.
+- Cores de texto e status com contraste legível nos temas claro e escuro.
 
 ## Requisitos técnicos
 
 - PyQt6, Python 3.11+, Windows.
 - `main.py` cria `QApplication`, define estilo `Fusion` + QSS, fonte
-  "Segoe UI", abre `MainWindow` centralizada e roda o loop.
+  "Chivo" (com fallback "Segoe UI"), abre `MainWindow` centralizada e roda o
+  loop. As fontes Chivo são embarcadas em `ui/assets/fonts` (licença OFL).
 - Separação em módulos: `ui/theme.py` (QSS/cores), `ui/widgets.py`
   (componentes reutilizáveis), `ui/worker.py` e `ui/envios_worker.py`
   (QThread), `ui/envios_tab.py`, `ui/envios_dialog.py` e
   `ui/main_window.py`.
 - Nada de caminhos fixos de arquivos: **toda** seleção de arquivo/pasta passa
   por `QFileDialog`.
-- Sem assets externos: desenhe fundo/ícones com `QPainter`/QSS.
+- Sem imagens externas: fundo e ícones são desenhados com `QPainter`/QSS.
+  Apenas os arquivos de fonte Chivo (OFL) acompanham o projeto.
 - Não alterar os `.ipynb`.
 
-## Direção visual: Frutiger Aero (anos 2000 / Windows Vista-7)
+## Direção visual: manual institucional GrupoSC
 
-- Fundo céu em degradê (azul profundo → ciano claro) com brilho de sol,
-  bolhas translúcidas e reflexos — desenhado em `paintEvent` do widget
-  central, sem imagens.
-- Painéis de "vidro" (glassmorphism): fundo semi-transparente claro,
-  borda branca suave, cantos arredondados, sombra.
-- Botões glossy com degradê vertical, metade superior clara, brilho
-  (`qlineargradient`), hover mais claro, pressed mais escuro.
-- Paleta: azul #0a4d8c / #1e90ff / #7fd4ff, verde água #63d8c4,
-  branco #f5fbff, texto escuro #0b2b46 em painéis claros.
-- Tipografia Segoe UI; títulos em negrito; texto legível (contraste AA).
-- Detalhes: indicador de status tipo LED, barra de progresso azul brilhante,
-  ícone da janela desenhado em código (bolha/onda) via `QPainter`.
-- Animações leves são bem-vindas (QPropertyAnimation), sem exageros.
-- Evitar aparência "flat genérica"; o alvo é o visual aquoso/brilhante da era
-  Frutiger Aero.
+Referência: `ins.fig` (frames claro e escuro), implementado com `QPainter` e
+QSS — sem imagens.
+
+- **Base clara**: fundo `#F8FAFC` com malha técnica discreta, cartões brancos
+  de aresta 8 px (`#E2E8F0`), texto `#1C2445`.
+- **Base escura**: fundo `#101B33`, cartões `#16224A`, bordas `#23335A`,
+  texto `#FFFFFF`/`#C9D6E8`, console `#08132B`.
+- **Institucional**: barra superior e rodapé em azul-marinho `#1C2445`
+  (escuro: `#08132B`), filetes de acento laranja `#FF9F00` e azul `#0090D0`
+  (escuro: `#33A6DE`), classificação em âmbar.
+- **Tipografia Chivo** (Regular/SemiBold/Bold/ExtraBold/Black) com fallback
+  Segoe UI; títulos 25 px, corpo 13 px, rótulos técnicos 10 px com
+  `letter-spacing`.
+- **Componentes**: cartões com filete 40×4 px no topo esquerdo, seletor
+  segmentado (laranja/azul), selos de estado (`PENDENTE`, `SELECIONADO`,
+  `PRONTO`), console escuro com cabeçalho de terminal e log com hora/nível.
+- **Tema claro/escuro**: alternado pelo botão sol/lua no cabeçalho
+  (`ThemeToggle`), persistido em `QSettings` (`ui/theme`). `build_stylesheet()`
+  recebe o tema e `ui/widgets` lê a paleta em tempo de pintura.
+- **Ícones**: vetoriais em `ui/icons.py` (grade 24×24), coloridos por papel
+  semântico (`accent`, `muted`, `navy`, etc.).
+- **Acessibilidade**: foco visível, alvos ≥ 24 px, contraste AA nos dois temas;
+  o console mantém texto claro sobre fundo escuro em ambos.
+
+O visual "Frutiger Aero" (céu, bolhas, vidro glossy) foi substituído por esta
+linguagem institucional; nenhuma lógica de backend ou fluxo operacional mudou.
 
 ## Critérios de aceite
 
@@ -184,7 +197,7 @@ enviar_plano(plano, chaves, sender_factory=None,
 - Smoke test offscreen sem exceções:
 
   ```powershell
-  $env:QT_QPA_PLATFORM='offscreen'; python -c "from PyQt6.QtWidgets import QApplication; from ui.main_window import MainWindow; app=QApplication([]); w=MainWindow(); print(w.windowTitle()); w.close()"
+  $env:QT_QPA_PLATFORM='offscreen'; python -c "from PyQt6.QtWidgets import QApplication; from ui.main_window import MainWindow; from ui.theme import build_stylesheet, set_theme; app=QApplication([]); app.setStyleSheet(build_stylesheet()); w=MainWindow(); w._apply_theme('dark'); w._apply_theme('light'); print(w.windowTitle()); w.close()"
   ```
 
 - Nenhuma chamada ao backend na thread da GUI.

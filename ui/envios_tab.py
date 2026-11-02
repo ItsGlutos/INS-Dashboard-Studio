@@ -15,8 +15,8 @@ O envio real só começa depois da confirmação visual no
 :class:`~ui.envios_dialog.EnviosConfirmDialog`.
 
 .. note::
-   **O layout será refeito.** Os métodos ``_build_*`` montam a aparência; os
-   demais métodos formam a lógica que **deve ser preservada**: o par
+   Os métodos ``_build_*`` montam apenas a aparência institucional; os demais
+   métodos formam a lógica que **deve ser preservada**: o par
    ``_running``/``_mode`` (máquina de estados "plan"/"send"), o uso de
    ``PlanWorker``/``SendWorker`` em ``QThread``, a seleção de modelos por tipo
    de relatório, a lista de cópia (CC), a exportação do log e a persistência
@@ -34,7 +34,7 @@ from datetime import datetime
 from pathlib import Path
 
 from PyQt6.QtCore import QSettings, Qt, QThread
-from PyQt6.QtGui import QFont, QTextCharFormat, QTextCursor
+from PyQt6.QtGui import QFont, QTextCharFormat
 from PyQt6.QtWidgets import (
     QDialog,
     QFileDialog,
@@ -59,7 +59,6 @@ from backend.envios import (
     DEFAULT_ASSUNTOS,
     DEFAULT_CORPOS,
     PREFIXOS,
-    EnvioError,
     EnvioResultado,
     PlanoEnvios,
     dividir_emails,
@@ -69,10 +68,12 @@ from backend.envios import (
 from .envios_dialog import EnviosConfirmDialog
 from .envios_worker import PlanWorker, SendWorker
 from .widgets import (
+    AccentCard,
     AeroCheckBox,
+    Badge,
     FileSelector,
-    GlassPanel,
     GlossyButton,
+    IconTile,
     LogView,
     SegmentedSelector,
     StatusLed,
@@ -139,7 +140,7 @@ class EnviosTab(QWidget):
         """Monta a barra superior e as quatro abas internas de envio."""
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(10)
+        root.setSpacing(12)
 
         root.addWidget(self._build_top())
         self._tabs = QTabWidget(self)
@@ -147,22 +148,32 @@ class EnviosTab(QWidget):
         self._tabs.setDocumentMode(True)
         self._tabs.setAccessibleName("Seções de envio de INS")
 
-        self._tabs.addTab(self._build_send_page(), "Envios")
+        self._tabs.addTab(self._build_send_page(), "ENVIOS")
         self._body_tab_index = self._tabs.addTab(
-            self._build_body_page(), "Corpo do e-mail"
+            self._build_body_page(), "CORPO DO E-MAIL"
         )
         self._copy_tab_index = self._tabs.addTab(
-            self._build_copy_page(), "Em cópia"
+            self._build_copy_page(), "EM CÓPIA"
         )
         self._log_tab_index = self._tabs.addTab(
-            self._build_log_page(), "Log"
+            self._build_log_page(), "LOG"
         )
         root.addWidget(self._tabs, 1)
 
     def _wrap_page(
-        self, page: QWidget, panel: QWidget, nome: str
+        self,
+        page: QWidget,
+        panel: QWidget,
+        nome: str,
+        expand: bool = True,
     ) -> QWidget:
-        """Coloca o painel em uma área rolável para telas baixas."""
+        """Coloca o painel em uma área rolável para telas baixas.
+
+        ``expand=False`` mantém o cartão no tamanho do conteúdo (útil em
+        formulários curtos); ``True`` faz o painel ocupar a altura disponível
+        (editores, listas e consoles).
+        """
+        page.setObjectName("scrollContent")
         scroll = QScrollArea(page)
         scroll.setObjectName("contentScroll")
         scroll.setWidgetResizable(True)
@@ -175,7 +186,17 @@ class EnviosTab(QWidget):
         )
         scroll.setAccessibleName(nome)
         scroll.viewport().setObjectName("contentScrollViewport")
-        scroll.setWidget(panel)
+        if expand:
+            scroll.setWidget(panel)
+        else:
+            holder = QWidget(scroll)
+            holder.setObjectName("scrollContent")
+            holder_layout = QVBoxLayout(holder)
+            holder_layout.setContentsMargins(0, 0, 0, 0)
+            holder_layout.setSpacing(0)
+            holder_layout.addWidget(panel)
+            holder_layout.addStretch(1)
+            scroll.setWidget(holder)
         page.layout().addWidget(scroll, 1)
         return page
 
@@ -185,29 +206,45 @@ class EnviosTab(QWidget):
         ``self._segmented`` e ``self._debug_check`` comandam o fluxo inteiro
         (prefixo dos arquivos e se o disparo é real ou apenas validação).
         """
-        panel = GlassPanel(self)
-        layout = QHBoxLayout(panel)
-        layout.setContentsMargins(18, 12, 18, 12)
-        layout.setSpacing(14)
+        panel = AccentCard(accent="orange")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(20, 14, 20, 14)
+        layout.setSpacing(8)
 
+        linha_titulo = QHBoxLayout()
+        linha_titulo.setSpacing(16)
         textos = QVBoxLayout()
         textos.setSpacing(2)
+        eyebrow = QLabel("MÓDULO DE DISPARO", panel)
+        eyebrow.setObjectName("cardEyebrow")
         titulo = QLabel("Envios de INS", panel)
         titulo.setObjectName("sectionTitle")
-        self._mode_hint = QLabel("", panel)
-        self._mode_hint.setObjectName("sectionHint")
-        self._mode_hint.setWordWrap(True)
+        textos.addWidget(eyebrow)
         textos.addWidget(titulo)
-        textos.addWidget(self._mode_hint)
-        layout.addLayout(textos, 1)
+        linha_titulo.addLayout(textos)
+        linha_titulo.addStretch(1)
 
+        seletor = QVBoxLayout()
+        seletor.setSpacing(4)
+        rotulo = QLabel("TIPO DE RELATÓRIO", panel)
+        rotulo.setObjectName("fieldCaption")
         self._segmented = SegmentedSelector(
             [("motorista", "Motorista"), ("transportador", "Transportador")],
             parent=panel,
         )
+        self._segmented.setMinimumWidth(320)
         self._segmented.changed.connect(self._on_type_changed)
-        layout.addWidget(self._segmented)
+        seletor.addWidget(rotulo)
+        seletor.addWidget(self._segmented)
+        linha_titulo.addLayout(seletor)
+        layout.addLayout(linha_titulo)
 
+        linha_modo = QHBoxLayout()
+        linha_modo.setSpacing(16)
+        self._mode_hint = QLabel("", panel)
+        self._mode_hint.setObjectName("sectionHint")
+        self._mode_hint.setWordWrap(True)
+        linha_modo.addWidget(self._mode_hint, 1)
         self._debug_check = AeroCheckBox(
             "Modo debug (validar sem enviar)", panel
         )
@@ -215,7 +252,8 @@ class EnviosTab(QWidget):
             "Quando marcado, prepara e valida os grupos sem disparar e-mails."
         )
         self._debug_check.toggled.connect(self._update_mode)
-        layout.addWidget(self._debug_check)
+        linha_modo.addWidget(self._debug_check)
+        layout.addLayout(linha_modo)
         return panel
 
     def _build_send_page(self) -> QWidget:
@@ -228,23 +266,27 @@ class EnviosTab(QWidget):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        panel = GlassPanel(page)
+        panel = AccentCard(accent="accent")
         content = QVBoxLayout(panel)
-        content.setContentsMargins(18, 16, 18, 16)
-        content.setSpacing(9)
+        content.setContentsMargins(24, 20, 24, 20)
+        content.setSpacing(12)
 
-        titulo = QLabel("1. Fontes e confirmação", panel)
-        titulo.setObjectName("sectionTitle")
-        content.addWidget(titulo)
-
+        eyebrow = QLabel("ETAPA 1 • FONTES", panel)
+        eyebrow.setObjectName("cardEyebrow")
+        titulo = QLabel("Fontes e confirmação", panel)
+        titulo.setObjectName("pageTitle")
         self._source_hint = QLabel("", panel)
         self._source_hint.setObjectName("sectionHint")
         self._source_hint.setWordWrap(True)
+
+        content.addWidget(eyebrow)
+        content.addWidget(titulo)
         content.addWidget(self._source_hint)
+        content.addSpacing(6)
 
         self._contacts_selector = FileSelector(
             "Planilha de contatos (colunas Transportadora + E-mail)",
-            button_text="Procurar…",
+            button_text="Procurar...",
             mode="file",
             dialog_title="Selecionar a planilha de contatos",
             file_filter="Planilhas do Excel (*.xlsx *.xlsm)",
@@ -254,7 +296,7 @@ class EnviosTab(QWidget):
 
         self._folder_selector = FileSelector(
             "Pasta com os arquivos INS",
-            button_text="Escolher…",
+            button_text="Escolher...",
             mode="directory",
             dialog_title="Selecionar a pasta com os arquivos INS",
             parent=panel,
@@ -264,8 +306,9 @@ class EnviosTab(QWidget):
         )
         content.addWidget(self._folder_selector)
 
+        content.addSpacing(6)
         status_row = QHBoxLayout()
-        status_row.setSpacing(9)
+        status_row.setSpacing(8)
         self._led = StatusLed(panel)
         self._status_label = QLabel("Pronto para preparar os envios", panel)
         self._status_label.setObjectName("statusText")
@@ -296,25 +339,38 @@ class EnviosTab(QWidget):
         self._summary_label.setWordWrap(True)
         content.addWidget(self._summary_label)
 
-        aviso = QLabel(
+        aviso = QFrame(panel)
+        aviso.setObjectName("infoBox")
+        aviso_layout = QHBoxLayout(aviso)
+        aviso_layout.setContentsMargins(12, 10, 12, 10)
+        aviso_layout.setSpacing(10)
+        aviso_layout.addWidget(IconTile("info", 26, "info_bg", "info_border", icon_role="info_text", radius=3, parent=aviso))
+        aviso_texto = QLabel(
             "Nada é enviado ao clicar em preparar: primeiro você revisa "
             "cada grupo e só então confirma o disparo.",
-            panel,
+            aviso,
         )
-        aviso.setObjectName("sectionHint")
-        aviso.setWordWrap(True)
+        aviso_texto.setObjectName("sectionHint")
+        aviso_texto.setWordWrap(True)
+        aviso_layout.addWidget(aviso_texto, 1)
         content.addWidget(aviso)
 
-        self._wrap_page(page, panel, "Conteúdo de envios")
+        self._wrap_page(
+            page, panel, "Conteúdo de envios", expand=False
+        )
 
-        footer_bar = GlassPanel(page)
+        footer_bar = AccentCard(accent="orange")
         footer_bar.setAccessibleName("Ações do envio")
         botoes = QHBoxLayout(footer_bar)
-        botoes.setContentsMargins(12, 8, 12, 8)
-        botoes.setSpacing(9)
+        botoes.setContentsMargins(16, 10, 16, 10)
+        botoes.setSpacing(10)
 
-        self._open_folder_button = GlossyButton("Abrir pasta", footer_bar)
-        self._open_folder_button.setObjectName("miniButton")
+        self._open_folder_button = GlossyButton(
+            "Abrir pasta",
+            footer_bar,
+            icon_name="folder",
+            icon_role="accent",
+        )
         self._open_folder_button.setEnabled(False)
         self._open_folder_button.clicked.connect(self._open_folder)
         botoes.addWidget(self._open_folder_button)
@@ -326,8 +382,13 @@ class EnviosTab(QWidget):
         self._cancel_button.clicked.connect(self._cancel)
         botoes.addWidget(self._cancel_button)
 
-        self._prepare_button = GlossyButton("Preparar envios", footer_bar)
-        self._prepare_button.setObjectName("primaryButton")
+        self._prepare_button = GlossyButton(
+            "Preparar envios",
+            footer_bar,
+            variant="primaryButton",
+            icon_name="mail",
+            icon_role="navy",
+        )
         self._prepare_button.clicked.connect(self._prepare)
         botoes.addWidget(self._prepare_button)
 
@@ -344,13 +405,16 @@ class EnviosTab(QWidget):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        panel = GlassPanel(page)
+        panel = AccentCard(accent="accent")
         content = QVBoxLayout(panel)
-        content.setContentsMargins(18, 14, 18, 14)
-        content.setSpacing(6)
+        content.setContentsMargins(24, 20, 24, 20)
+        content.setSpacing(8)
 
-        titulo = QLabel("2. Corpo do e-mail", panel)
-        titulo.setObjectName("sectionTitle")
+        eyebrow = QLabel("ETAPA 2 • CONTEÚDO", panel)
+        eyebrow.setObjectName("cardEyebrow")
+        titulo = QLabel("Corpo do e-mail", panel)
+        titulo.setObjectName("pageTitle")
+        content.addWidget(eyebrow)
         content.addWidget(titulo)
 
         dica = QLabel(
@@ -362,8 +426,9 @@ class EnviosTab(QWidget):
         dica.setObjectName("sectionHint")
         dica.setWordWrap(True)
         content.addWidget(dica)
+        content.addSpacing(6)
 
-        rotulo_assunto = QLabel("Assunto", panel)
+        rotulo_assunto = QLabel("ASSUNTO", panel)
         rotulo_assunto.setObjectName("fieldCaption")
         content.addWidget(rotulo_assunto)
 
@@ -378,8 +443,9 @@ class EnviosTab(QWidget):
         )
         rotulo_assunto.setBuddy(self._subject)
         content.addWidget(self._subject)
+        content.addSpacing(6)
 
-        rotulo_corpo = QLabel("Corpo (editor com formatação)", panel)
+        rotulo_corpo = QLabel("CORPO (EDITOR COM FORMATAÇÃO)", panel)
         rotulo_corpo.setObjectName("fieldCaption")
         content.addWidget(rotulo_corpo)
 
@@ -396,12 +462,22 @@ class EnviosTab(QWidget):
         )
         formatos.addSpacing(10)
 
-        inserir = GlossyButton("Inserir {transportadora}", panel)
+        inserir = GlossyButton(
+            "Inserir {transportadora}",
+            panel,
+            icon_name="arrow-right",
+            icon_role="accent",
+        )
         inserir.setObjectName("miniButton")
         inserir.clicked.connect(self._insert_placeholder)
         formatos.addWidget(inserir)
 
-        restaurar = GlossyButton("Restaurar padrão", panel)
+        restaurar = GlossyButton(
+            "Restaurar padrão",
+            panel,
+            icon_name="refresh",
+            icon_role="muted",
+        )
         restaurar.setObjectName("miniButton")
         restaurar.clicked.connect(self._restore_defaults)
         formatos.addWidget(restaurar)
@@ -463,13 +539,16 @@ class EnviosTab(QWidget):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        panel = GlassPanel(page)
+        panel = AccentCard(accent="accent")
         content = QVBoxLayout(panel)
-        content.setContentsMargins(18, 16, 18, 16)
-        content.setSpacing(8)
+        content.setContentsMargins(24, 20, 24, 20)
+        content.setSpacing(10)
 
-        titulo = QLabel("3. Em cópia (CC)", panel)
-        titulo.setObjectName("sectionTitle")
+        eyebrow = QLabel("ETAPA 3 • CÓPIA", panel)
+        eyebrow.setObjectName("cardEyebrow")
+        titulo = QLabel("Em cópia (CC)", panel)
+        titulo.setObjectName("pageTitle")
+        content.addWidget(eyebrow)
         content.addWidget(titulo)
 
         dica = QLabel(
@@ -481,6 +560,7 @@ class EnviosTab(QWidget):
         dica.setObjectName("sectionHint")
         dica.setWordWrap(True)
         content.addWidget(dica)
+        content.addSpacing(4)
 
         entrada = QHBoxLayout()
         entrada.setSpacing(8)
@@ -498,7 +578,12 @@ class EnviosTab(QWidget):
         self._copy_input.returnPressed.connect(self._add_copy_emails)
         entrada.addWidget(self._copy_input, 1)
 
-        adicionar = GlossyButton("Adicionar", panel)
+        adicionar = GlossyButton(
+            "Adicionar",
+            panel,
+            icon_name="check",
+            icon_role="accent",
+        )
         adicionar.setObjectName("miniButton")
         adicionar.clicked.connect(self._add_copy_emails)
         entrada.addWidget(adicionar)
@@ -520,7 +605,12 @@ class EnviosTab(QWidget):
 
         botoes = QHBoxLayout()
         botoes.setSpacing(8)
-        remover = GlossyButton("Remover selecionado", panel)
+        remover = GlossyButton(
+            "Remover selecionado",
+            panel,
+            icon_name="trash",
+            icon_role="muted",
+        )
         remover.setObjectName("miniButton")
         remover.clicked.connect(self._remove_copy_email)
         botoes.addWidget(remover)
@@ -540,13 +630,16 @@ class EnviosTab(QWidget):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        panel = GlassPanel(page)
+        panel = AccentCard(accent="accent")
         content = QVBoxLayout(panel)
-        content.setContentsMargins(18, 16, 18, 16)
-        content.setSpacing(8)
+        content.setContentsMargins(24, 20, 24, 20)
+        content.setSpacing(10)
 
-        titulo = QLabel("4. Log de envios", panel)
-        titulo.setObjectName("sectionTitle")
+        eyebrow = QLabel("ETAPA 4 • AUDITORIA", panel)
+        eyebrow.setObjectName("cardEyebrow")
+        titulo = QLabel("Log de envios", panel)
+        titulo.setObjectName("pageTitle")
+        content.addWidget(eyebrow)
         content.addWidget(titulo)
 
         dica = QLabel(
@@ -557,24 +650,28 @@ class EnviosTab(QWidget):
         dica.setObjectName("sectionHint")
         dica.setWordWrap(True)
         content.addWidget(dica)
+        content.addSpacing(4)
 
         contadores = QHBoxLayout()
         contadores.setSpacing(8)
-        self._sent_count = QLabel("Enviados: 0", panel)
-        self._failed_count = QLabel("Falhos: 0", panel)
-        self._missing_count = QLabel("Não encontrados: 0", panel)
+        self._sent_count = Badge("Enviados: 0", "ok", panel)
+        self._failed_count = Badge("Falhos: 0", "danger", panel)
+        self._missing_count = Badge("Não encontrados: 0", "warn", panel)
         for label in (
             self._sent_count,
             self._failed_count,
             self._missing_count,
         ):
-            label.setObjectName("countChip")
-            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            label.setAccessibleName(label.text())
             contadores.addWidget(label)
         contadores.addStretch(1)
         content.addLayout(contadores)
 
-        self._log_view = LogView(panel)
+        self._log_view = LogView(
+            panel,
+            title="CONSOLE DE ENVIOS • GRUPOSC",
+            meta="UTF-8 • outlook-engine-v1.1",
+        )
         self._log_view.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
@@ -582,12 +679,22 @@ class EnviosTab(QWidget):
 
         botoes = QHBoxLayout()
         botoes.setSpacing(8)
-        exportar = GlossyButton("Exportar CSV", panel)
+        exportar = GlossyButton(
+            "Exportar CSV",
+            panel,
+            icon_name="download",
+            icon_role="accent",
+        )
         exportar.setObjectName("miniButton")
         exportar.clicked.connect(self._export_log)
         botoes.addWidget(exportar)
 
-        limpar = GlossyButton("Limpar log", panel)
+        limpar = GlossyButton(
+            "Limpar log",
+            panel,
+            icon_name="trash",
+            icon_role="muted",
+        )
         limpar.setObjectName("miniButton")
         limpar.clicked.connect(self._clear_log)
         botoes.addWidget(limpar)

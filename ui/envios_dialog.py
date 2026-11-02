@@ -5,8 +5,8 @@ cópias e situação. Somente linhas marcadas e prontas são enviadas. Em modo
 debug o diálogo serve apenas para validação: nenhum e-mail é disparado.
 
 .. note::
-   **A tabela/prévia serão refeitas no redesign.** A aparência está em
-   ``_build_ui`` e ``_fill_row``; o que precisa ser preservado é o contrato:
+   A aparência está em ``_build_ui`` e ``_fill_row``; o que precisa ser
+   preservado é o contrato:
    :meth:`selected_keys` devolve apenas grupos marcados **e** ``pronto``, e
    ``accept()`` só é chamado quando há seleção válida. Em modo debug o botão
    de confirmação fica oculto e nada é enviado.
@@ -33,14 +33,22 @@ from PyQt6.QtWidgets import (
 
 from backend.envios import GrupoEnvio, PlanoEnvios
 
-from .widgets import AeroCheckBox, GlossyButton
+from .theme import palette
+from .widgets import AeroCheckBox, Badge, GlossyButton, IconWidget
 
 __all__ = ["EnviosConfirmDialog"]
 
 _COLUNAS = ["", "Transportadora", "Arquivo", "Para", "Cópia", "Situação"]
-_COR_OK = QColor("#0b6b4f")
-_COR_ERRO = QColor("#a12424")
-_COR_NEUTRA = QColor("#52667a")
+
+
+def _cores() -> dict[str, QColor]:
+    """Cores de situação coerentes com o tema ativo."""
+    p = palette()
+    return {
+        "ok": QColor(p["ok_text"]),
+        "erro": QColor(p["danger"]),
+        "neutra": QColor(p["subtle"]),
+    }
 
 
 class EnviosConfirmDialog(QDialog):
@@ -91,16 +99,28 @@ class EnviosConfirmDialog(QDialog):
     # ------------------------------------------------------------------
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 16, 20, 14)
+        layout.setContentsMargins(24, 20, 24, 16)
         layout.setSpacing(8)
 
+        eyebrow = QLabel(
+            "REVISÃO • MODO DEBUG" if self._debug else "REVISÃO • DISPARO REAL"
+        )
+        eyebrow.setObjectName("cardEyebrow")
+        layout.addWidget(eyebrow)
+
+        titulo_row = QHBoxLayout()
+        titulo_row.setSpacing(9)
+        titulo_row.addWidget(
+            IconWidget("mail" if not self._debug else "shield", 22, "accent")
+        )
         titulo = QLabel(
             "Validação por transportadora"
             if self._debug
             else "Confirme os grupos antes de enviar"
         )
         titulo.setObjectName("dialogTitle")
-        layout.addWidget(titulo)
+        titulo_row.addWidget(titulo, 1)
+        layout.addLayout(titulo_row)
 
         if self._debug:
             subtitulo_texto = (
@@ -124,8 +144,7 @@ class EnviosConfirmDialog(QDialog):
             f"{len(self._plano.prontos)} pronto(s) · "
             f"{len(self._plano.nao_encontrados)} não encontrado(s)"
         )
-        stats = QLabel(resumo)
-        stats.setObjectName("chip")
+        stats = Badge(resumo, "info")
         stats.setToolTip(self._plano.resumo())
         stats.setMinimumHeight(24)
         stats.setAccessibleName("Resumo dos grupos de envio")
@@ -169,7 +188,7 @@ class EnviosConfirmDialog(QDialog):
             QAbstractItemView.EditTrigger.NoEditTriggers
         )
         self.table.setTabKeyNavigation(False)
-        self.table.verticalHeader().setDefaultSectionSize(30)
+        self.table.verticalHeader().setDefaultSectionSize(32)
         self.table.setMinimumHeight(170)
         self.table.setAccessibleName("Transportadoras e situação do envio")
         self.table.setAccessibleDescription(
@@ -179,15 +198,17 @@ class EnviosConfirmDialog(QDialog):
         self.table.installEventFilter(self)
 
         header = self.table.horizontalHeader()
+        header.setMinimumSectionSize(80)
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Interactive)
         self.table.setColumnWidth(0, 38)
-        self.table.setColumnWidth(1, 190)
-        self.table.setColumnWidth(2, 250)
+        self.table.setColumnWidth(1, 130)
+        self.table.setColumnWidth(2, 210)
+        self.table.setColumnWidth(5, 150)
         self.table.itemSelectionChanged.connect(self._update_preview)
         layout.addWidget(self.table, 1)
 
@@ -246,7 +267,7 @@ class EnviosConfirmDialog(QDialog):
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
         self._preview_body.setOpenExternalLinks(False)
-        self._preview_body.setMinimumHeight(70)
+        self._preview_body.setMinimumHeight(90)
         self._preview_body.setSizePolicy(
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum
         )
@@ -377,12 +398,13 @@ class EnviosConfirmDialog(QDialog):
         arquivo.setToolTip(str(grupo.arquivo))
         self.table.setItem(linha, 2, arquivo)
 
+        cores = _cores()
         para = QTableWidgetItem(
             "; ".join(grupo.para) if grupo.para else "—"
         )
         para.setToolTip("\n".join(grupo.para))
         para.setForeground(
-            QBrush(_COR_NEUTRA) if not grupo.para else QBrush(_COR_OK)
+            QBrush(cores["neutra"]) if not grupo.para else QBrush(cores["ok"])
         )
         self.table.setItem(linha, 3, para)
 
@@ -390,14 +412,12 @@ class EnviosConfirmDialog(QDialog):
             "; ".join(grupo.copia) if grupo.copia else "—"
         )
         copia.setToolTip("\n".join(grupo.copia))
-        copia.setForeground(QBrush(_COR_NEUTRA))
+        copia.setForeground(QBrush(cores["neutra"]))
         self.table.setItem(linha, 4, copia)
 
-        situacao = QTableWidgetItem(
-            ("✔ " if grupo.pronto else "✖ ") + grupo.rotulo_status
-        )
+        situacao = QTableWidgetItem(grupo.rotulo_status)
         situacao.setForeground(
-            QBrush(_COR_OK) if grupo.pronto else QBrush(_COR_ERRO)
+            QBrush(cores["ok"]) if grupo.pronto else QBrush(cores["erro"])
         )
         dica = grupo.detalhe or grupo.rotulo_status
         situacao.setToolTip(dica)
