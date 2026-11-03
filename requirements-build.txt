@@ -1,0 +1,13 @@
+# Dependências exclusivas da geração do executável.
+#
+# Use com:
+#   pip install -r requirements-build.txt
+
+-r requirements.txt
+
+# O aplicativo foi homologado com a linha 2.x do pandas. A linha 3.x mudou
+# padrões de cópia/tipos e não faz parte desta distribuição.
+pandas>=2.2,<3
+
+# Empacotador do .exe (não é necessário para executar o aplicativo).
+pyinstaller>=6.16

@@ -11,6 +11,10 @@ _saida_teste/
 _tmp_fixtures/
 *.log
 
+# Distribuição gerada pelo PyInstaller
+build/
+dist/
+
 # Planilhas e dashboards gerados (dados de negócio não vão para o repositório)
 *.xlsx
 *.xlsm
